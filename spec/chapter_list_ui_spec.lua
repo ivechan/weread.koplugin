@@ -119,11 +119,21 @@ local book = { bookId = "book-1", title = "Book", cached_chapters = {} }
 host:showChapterList(book)
 expect(catalog_view_data.title == "Book" and #catalog_view_data.chapters == 7,
     "chapter catalog view receives the title and all chapters")
-expect(catalog_view_data.chapters[1].status == "100 words",
-    "chapter catalog preserves the right-side word-count status")
+expect(catalog_view_data.chapters[1].title == "Chapter 1"
+    and catalog_view_data.chapters[1].source == chapters[1]
+    and catalog_view_data.chapters[1].index == 1,
+    "chapter catalog entries carry title, source and index")
+expect(catalog_view_data.status_of(catalog_view_data.chapters[1]) == "100 words",
+    "chapter catalog lazily resolves the right-side word-count status")
 expect(type(catalog_view_callbacks.on_refresh) == "function"
     and type(catalog_view_callbacks.on_select_download) == "function",
     "chapter catalog keeps refresh and multi-download actions")
+local reading_book = {
+    bookId = "book-2", title = "Book 2", cached_chapters = {}, chapter_uid = 3,
+}
+host:showChapterList(reading_book)
+expect(catalog_view_data.current_index == 3,
+    "chapter catalog opens at the chapter currently being read")
 catalog_view_callbacks.on_select(chapters[1])
 expect(opened_chapter == chapters[1], "chapter row opens the selected chapter")
 expect(type(single_chapter_refresh) == "function",
@@ -166,7 +176,7 @@ persisted_books["book-1"] = {
 downloaded_options.on_complete(true)
 expect(closed == 1 and returned_to_parent,
     "successful multi-download closes selection and returns to parent list")
-expect(catalog_view_data.chapters[1].status == "Cached",
+expect(catalog_view_data.status_of(catalog_view_data.chapters[1]) == "Cached",
     "successful multi-download refreshes cached chapter status")
 
 print(string.format(
