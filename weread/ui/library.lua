@@ -68,6 +68,30 @@ local function list_items_per_page()
     return math.max(4, perpage)
 end
 
+-- Locate the chapter the reader is currently on, so the catalog can open at it
+-- and offer "jump to current chapter". Uid and index are authoritative; the
+-- percentage is only a last-resort estimate.
+local function resolve_current_index(book, chapters)
+    if type(book) ~= "table" or type(chapters) ~= "table" then return nil end
+    local target_uid = book.chapter_uid
+    local target_idx = book.chapter_idx
+    for index, chapter in ipairs(chapters) do
+        local uid = tostring(chapter.chapterUid or chapter.chapterId or index)
+        if target_uid ~= nil and uid == tostring(target_uid) then
+            return index
+        end
+        if target_idx ~= nil
+            and tonumber(chapter.chapterIdx or chapter.chapterIndex) == tonumber(target_idx) then
+            return index
+        end
+    end
+    if tonumber(book.progress) then
+        local progress = math.max(0, math.min(100, tonumber(book.progress)))
+        return math.floor(progress / 100 * math.max(0, #chapters - 1)) + 1
+    end
+    return nil
+end
+
 function M:showBookshelf()
     local cached = self.library_db and self.library_db:getShelf() or nil
     local archives = self.library_db and self.library_db:getShelfArchives() or nil
@@ -1300,21 +1324,31 @@ function M:showChapterList(book, on_close)
         -- Always rebuild from that persisted record instead of the snapshot
         -- captured when the chapter list was first opened.
         reloadBookCache()
-        local rows = {}
-        for _i, chapter in ipairs(chapters) do
+        local entries = {}
+        for index, chapter in ipairs(chapters) do
             local chapter_uid = chapter.chapterUid or chapter.chapterId
-            local cached = book.cached_chapters
-                and book.cached_chapters[tostring(chapter_uid)]
+            entries[#entries + 1] = {
+                title = chapter.title or T(_("Chapter %1"), tostring(chapter_uid)),
+                source = chapter,
+                index = index,
+            }
+        end
+        -- Status is resolved lazily for the materialized rows only: resolving it
+        -- up front would stat every cached chapter on each open.
+        local status_cache = {}
+        local function status_of(entry)
+            local chapter = entry.source
+            local uid = tostring(chapter.chapterUid or chapter.chapterId or entry.index)
+            if status_cache[uid] ~= nil then return status_cache[uid] end
+            local cached = book.cached_chapters and book.cached_chapters[uid]
             if cached and not file_exists(cached) then
-                book.cached_chapters[tostring(chapter_uid)] = nil
+                book.cached_chapters[uid] = nil
                 cached = nil
             end
-            rows[#rows + 1] = {
-                title = chapter.title or T(_("Chapter %1"), tostring(chapter_uid)),
-                status = cached and _("Cached")
-                    or T(_("%1 words"), tostring(chapter.wordCount or 0)),
-                source = chapter,
-            }
+            local status = cached and _("Cached")
+                or T(_("%1 words"), tostring(chapter.wordCount or 0))
+            status_cache[uid] = status
+            return status
         end
         if old_view then
             UIManager:close(old_view)
@@ -1325,7 +1359,9 @@ function M:showChapterList(book, on_close)
         local view
         view = ChapterListView.show({
             title = book.title or _("Chapter list"),
-            chapters = rows,
+            chapters = entries,
+            current_index = resolve_current_index(book, chapters),
+            status_of = status_of,
         }, {
             on_refresh = self:safeCallback(_("Refresh chapter list"), function()
                 self:loadChapters(book, function(refreshed_chapters)
