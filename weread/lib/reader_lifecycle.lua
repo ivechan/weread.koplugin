@@ -286,7 +286,7 @@ function M:maybePrefetchNextChapter(book_id)
         single_chapter = true,
         include_annotations = false,
         prefetch = true,
-        start_delay = cache.show_prefetch_notifications == false and 0.1 or 0.7,
+        start_delay = 0.1,
         silent_completion = true,
         offer_read = false,
         on_start = function()
@@ -294,8 +294,6 @@ function M:maybePrefetchNextChapter(book_id)
                 "book_id=", tostring(book_id),
                 "chapter_uid=", next_uid,
                 "title=", title)
-            self:showPrefetchNotice(
-                T(_("Prefetching next chapter: %1"), title), 0.5)
         end,
         on_complete = function(ok, value)
             if ok then
@@ -312,7 +310,6 @@ function M:maybePrefetchNextChapter(book_id)
                     "book_id=", tostring(book_id),
                     "chapter_uid=", next_uid,
                     "title=", title)
-                self:showPrefetchNotice(T(_("Next chapter prefetched: %1"), title))
                 return
             end
             local retry_requested = self.downloader:isPromotedPrefetch(
@@ -339,12 +336,10 @@ function M:maybePrefetchNextChapter(book_id)
                 "chapter_uid=", next_uid,
                 "title=", title,
                 "reason=", log_error(value))
-            self:showPrefetchNotice(T(_("Next chapter prefetch failed: %1"), reason))
+            self:showPrefetchNotice(T(_("Next chapter prefetch failed: %1"), reason), 3)
             if retry_requested then
                 local source_file = file
-                local retry_cache = self.settings:get("cache")
-                local retry_delay = retry_cache.show_prefetch_notifications == false
-                    and 0.1 or 1.1
+                local retry_delay = 0.5
                 UIManager:scheduleIn(retry_delay, function()
                     if self.ui.document and self.ui.document.file == source_file then
                         self:openChapterForReading(book, next_chapter)

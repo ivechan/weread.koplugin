@@ -110,13 +110,12 @@ expect(#starts == 1 and starts[1].chapters[1] == chapters[2],
     "only the immediate next chapter is selected")
 expect(starts[1].options.include_annotations == false,
     "prefetch creates clean text regardless of the legacy annotation preference")
-expect(starts[1].options.start_delay == 0.7,
-    "visible start notice gets time to close before network work")
+expect(starts[1].options.start_delay == 0.1,
+    "prefetch starts promptly without waiting on a notice")
 
 starts[1].options.on_start()
 starts[1].options.on_complete(true, "/cache/two.epub")
-expect(#notices == 2 and notices[1][2] == 0.5 and notices[2][2] == 1,
-    "start notice lasts half a second and completion lasts one second")
+expect(#notices == 0, "prefetch start and success are silent")
 expect(#logs == 2 and logs[1][1] == "info" and logs[2][1] == "info",
     "prefetch start and success are logged")
 
@@ -132,18 +131,17 @@ existing["/cache/two.epub"] = nil
 host:maybePrefetchNextChapter("book")
 starts[1].options.on_complete(false, "offline")
 expect(#notices == 1
-    and notices[1][1]:find("Network is not connected", 1, true) ~= nil,
-    "offline prefetch reports a failure")
+    and notices[1][1]:find("Network is not connected", 1, true) ~= nil
+    and notices[1][2] == 3,
+    "offline prefetch reports a long-lived failure notice")
 expect(logs[#logs][1] == "warn", "prefetch failure is logged")
 
 cache.show_prefetch_notifications = false
-starts = {}
+starts, notices = {}, {}
 host:maybePrefetchNextChapter("book")
-expect(starts[1].options.start_delay == 0.1,
-    "silent prefetch does not pay the notification grace delay")
 starts[1].options.on_start()
 starts[1].options.on_complete(false, "network error")
-expect(#notices == 1, "notification setting silences all prefetch notices")
+expect(#notices == 0, "the notification setting silences prefetch failures")
 
 -- Low memory skips the background prefetch; end-of-chapter auto-continue will
 -- download the chapter on demand instead, avoiding fork/COW pressure.
