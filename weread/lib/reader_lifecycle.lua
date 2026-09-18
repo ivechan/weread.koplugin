@@ -124,6 +124,124 @@ function M:handleEndOfBook(status_self)
     return self._orig_onEndOfBook(status_self)
 end
 
+-- KOReader emits EndOfBook at the end of a document but has no matching
+-- "begin of book" event, so a backward page turn at the very start is simply
+-- clamped. Wrap the page-turn entry point to continue into the previous
+-- chapter instead, mirroring the end-of-chapter auto-continue.
+function M:_installPreviousChapterHook()
+    local reader = self.ui and (self.ui.paging or self.ui.rolling)
+    if not reader or type(reader.onGotoViewRel) ~= "function" then
+        return false
+    end
+    if self._prev_chapter_hook_reader == reader then
+        return true
+    end
+    self:_removePreviousChapterHook()
+    local original = reader.onGotoViewRel
+    self._prev_chapter_hook_reader = reader
+    self._prev_chapter_hook_original = original
+    reader.onGotoViewRel = function(reader_self, diff, ...)
+        if type(diff) == "number" and diff < 0
+            and self:_maybeOpenPreviousChapter() then
+            return true
+        end
+        return original(reader_self, diff, ...)
+    end
+    return true
+end
+
+function M:_removePreviousChapterHook()
+    local reader = self._prev_chapter_hook_reader
+    local original = self._prev_chapter_hook_original
+    if reader and original and reader.onGotoViewRel ~= original then
+        reader.onGotoViewRel = original
+    end
+    self._prev_chapter_hook_reader = nil
+    self._prev_chapter_hook_original = nil
+end
+
+-- True when the reader sits at the very beginning of the document, so a
+-- backward turn has nowhere to go. Scroll mode must be at offset 0; page mode
+-- and paging must be on the first page (and, for paging, at the top of it).
+function M:_isAtDocumentStart()
+    local rolling = self.ui and self.ui.rolling
+    if rolling then
+        if rolling.view and rolling.view.view_mode == "scroll" then
+            local pos = tonumber(rolling.current_pos)
+            return pos ~= nil and pos <= 0
+        end
+        local page = tonumber(rolling.current_page)
+        return page ~= nil and page <= 1
+    end
+    local paging = self.ui and self.ui.paging
+    if paging then
+        local page = tonumber(paging.current_page)
+        if not page or page > 1 then return false end
+        local area = paging.visible_area
+        if area and tonumber(area.y) and tonumber(area.y) > 0 then return false end
+        return true
+    end
+    return false
+end
+
+function M:_maybeOpenPreviousChapter()
+    if self.settings:get("cache").auto_previous_chapter == false then
+        return false
+    end
+    if not self:_isAtDocumentStart() then
+        return false
+    end
+    return self:openPreviousChapter()
+end
+
+-- Open the chapter before the one currently shown. Only single-chapter files
+-- qualify (a full-book EPUB pages across chapters on its own), and only when a
+-- predecessor exists. The target opens at its end so paging continues
+-- backwards.
+function M:openPreviousChapter()
+    local book_id = self:detectWeReadBook()
+    if not book_id or WeRead.is_mp_book(book_id) then return false end
+    local books = self.settings:get("books", {})
+    local book = books[tostring(book_id)] or books[book_id]
+    if type(book) ~= "table" then return false end
+    local chapters = self:ensureChaptersLoaded(book)
+    local file = self.ui.document and self.ui.document.file
+    local current_idx, current_ch, is_full_book = self:getChapterInfoFromFile(book, file)
+    if is_full_book or not current_idx or current_idx <= 1 then return false end
+    local prev_chapter = chapters and chapters[current_idx - 1]
+    if type(prev_chapter) ~= "table" then return false end
+    self._pending_previous_end = {
+        book_id = tostring(book_id),
+        chapter_uid = tostring(prev_chapter.chapterUid
+            or prev_chapter.chapterId or ""),
+    }
+    if not self:openChapterForReading(book, prev_chapter) then
+        self._pending_previous_end = nil
+        return false
+    end
+    return true
+end
+
+-- After the previous chapter opens, jump to its end. Guarded by book and
+-- chapter so a stale marker never moves an unrelated document.
+function M:_applyPendingPreviousEnd(book_id)
+    local pending = self._pending_previous_end
+    if not pending then return end
+    self._pending_previous_end = nil
+    if tostring(book_id or "") ~= pending.book_id then return end
+    local books = self.settings:get("books", {})
+    local book = books[pending.book_id]
+    local file = self.ui.document and self.ui.document.file
+    local current_idx, current_ch = self:getChapterInfoFromFile(book, file)
+    local uid = current_ch
+        and tostring(current_ch.chapterUid or current_ch.chapterId)
+    if not current_idx or uid ~= pending.chapter_uid then return end
+    UIManager:scheduleIn(0.3, function()
+        if not self.ui.document or self.ui.document.file ~= file then return end
+        self.progress_sync.goto_fraction(1)
+    end)
+end
+
 function M:onReaderReady()
     self._reader_session_gen = (self._reader_session_gen or 0) + 1
     local perf = PluginUtil.reader_open_perf
@@ -140,6 +258,7 @@ function M:onReaderReady()
         -- we must intercept taps on thought links to suppress the native footnote
         -- popup. Visibility is decided inside _onThoughtTap / applyAnnotationVisibility.
         self:_setupThoughtInterception()
+        self:_installPreviousChapterHook()
         if self.settings:get("cache").show_annotations ~= false
             and not (self._usesUnifiedAnnotations and self:_usesUnifiedAnnotations()) then
             local db_session_gen = self._reader_session_gen
@@ -175,6 +294,7 @@ function M:onReaderReady()
 
     local annotations_ready = perf("annotations_ready", opened)
     self.progress_sync:on_reader_ready()
+    self:_applyPendingPreviousEnd(weread_book_id)
     local prefetch_session_gen = self._reader_session_gen
     UIManager:scheduleIn(0.2, function()
         if prefetch_session_gen ~= self._reader_session_gen then return end
@@ -212,6 +332,8 @@ function M:onCloseDocument()
     self:_teardownThoughtInterception()
     self:_teardownXPointerOverlayPrototype()
     self:_removeReaderHighlightTapGuard()
+    self:_removePreviousChapterHook()
+    self._pending_previous_end = nil
 
     if self._orig_onEndOfBook and self.ui.status then
         self.ui.status.onEndOfBook = self._orig_onEndOfBook

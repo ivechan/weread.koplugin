@@ -32,8 +32,13 @@ package.preload["logger"] = function()
         err = function() end,
     }
 end
+local scheduled = {}
 package.preload["ui/uimanager"] = function()
-    return {}
+    return {
+        scheduleIn = function(_self, delay, callback)
+            scheduled[#scheduled + 1] = { delay = delay, callback = callback }
+        end,
+    }
 end
 package.preload["ui/widget/container/widgetcontainer"] = function()
     local base = {
@@ -55,6 +60,7 @@ local settings_values = {
         book_id = "",
         report_on_open = true,
     },
+    ui = { open_bookshelf_on_start = true },
 }
 local fake_settings = {
     data_dir = "/tmp/weread-plugin-load",
@@ -216,10 +222,21 @@ expect(dispatcher_registered, "dispatcher actions were not registered")
 expect(menu_registered, "plugin was not registered in KOReader's main menu")
 expect(backup_cleaned,
     "successful plugin initialization did not clean the update backup")
+expect(#scheduled == 1 and scheduled[1].delay == 0.3,
+    "opening the bookshelf on start was not scheduled")
+scheduled[1].callback()
+expect(bookshelf_opened, "the startup callback did not open the bookshelf")
+bookshelf_opened = false
 expect(plugin:launch() == true and bookshelf_opened,
     "standard third-party launcher entry did not open the bookshelf")
 expect(type(plugin.openBookshelf) == "function",
     "stable bookshelf entry point was not exposed")
+
+-- Opening the bookshelf on start only fires for the first UI of the process.
+scheduled = {}
+plugin:init()
+expect(#scheduled == 0,
+    "bookshelf on start must not fire for a later UI instance")
 expect(package.loaded["weread.lib.client"] ~= nil,
     "namespaced client module was not loaded")
 expect(package.loaded["weread.ui.menu"] ~= nil,

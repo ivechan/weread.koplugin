@@ -97,5 +97,21 @@ expect(method_by_name["OEBPS/images/a.jpg"] == "store"
     and method_by_name["OEBPS/images/b.png"] == "store",
     "image assets must be stored, not deflated")
 
+-- Disk-backed image assets stream the directory and must be stored too.
+added = {}
+local image_dir = dir .. "/images"
+os.execute("mkdir -p " .. image_dir)
+local image = assert(io.open(image_dir .. "/a.jpg", "wb"))
+image:write("JPEGDATA")
+image:close()
+Content.save_chapter_epub(settings, book, chapter, "<p>hi</p>",
+    { { href = "images/a.jpg", path = image_dir .. "/a.jpg" } }, nil)
+local disk_method
+for _i, entry in ipairs(added) do
+    if entry.name == "OEBPS/images" then disk_method = entry.method end
+end
+expect(disk_method == "store",
+    "disk-backed image directories must be stored, not deflated")
+
 os.execute("rm -rf " .. dir)
 print(("content_epub_compression_spec: %d checks"):format(checks))
