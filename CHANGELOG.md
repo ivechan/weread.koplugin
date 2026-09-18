@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+- 插件自更新改为从本仓库（ivechan/weread.koplugin）的 GitHub Release 检查与下载。
+
 ## [1.4.6]
 
 - 预下载开始与完成不再弹出提示，仅在预下载失败时提示，并延长提示停留时间，减少对阅读的打扰。

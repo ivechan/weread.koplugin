@@ -37,6 +37,12 @@ local Updater = require("weread.lib.updater")
 
 expect(Updater.MAX_PACKAGE_BYTES == 10 * 1024 * 1024,
     "update package limit must be 10 MiB")
+expect(Updater.API_URL
+    == "https://api.github.com/repos/ivechan/weread.koplugin/releases/latest",
+    "update checks must target the ivechan repository")
+expect(Updater.RELEASE_PREFIX
+    == "https://github.com/ivechan/weread.koplugin/releases/download/",
+    "update downloads must target the ivechan repository")
 
 expect(Updater.compare_versions("1.2.3", "1.2.2") == 1,
     "newer version was not detected")
@@ -65,16 +71,16 @@ local release, release_err = Updater.parse_release({
     draft = false,
     prerelease = false,
     body = "## What's Changed\n\n**Added** `updates`",
-    html_url = "https://github.com/finlater/weread.koplugin/releases/tag/v0.7.0",
+    html_url = "https://github.com/ivechan/weread.koplugin/releases/tag/v0.7.0",
     assets = {
         {
             name = "weread.koplugin-v0.7.0.zip",
-            browser_download_url = "https://github.com/finlater/weread.koplugin/releases/download/v0.7.0/weread.koplugin-v0.7.0.zip",
+            browser_download_url = "https://github.com/ivechan/weread.koplugin/releases/download/v0.7.0/weread.koplugin-v0.7.0.zip",
             size = 1234,
         },
         {
             name = "weread.koplugin-v0.7.0.zip.sha256",
-            browser_download_url = "https://github.com/finlater/weread.koplugin/releases/download/v0.7.0/weread.koplugin-v0.7.0.zip.sha256",
+            browser_download_url = "https://github.com/ivechan/weread.koplugin/releases/download/v0.7.0/weread.koplugin-v0.7.0.zip.sha256",
         },
     },
 })
