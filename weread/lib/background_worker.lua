@@ -14,6 +14,12 @@ local Worker = {}
 Worker.__index = Worker
 
 local DEFAULT_MIN_AVAILABLE_KB = 64 * 1024
+-- The launch gate is a soft hint, not a reservation: fork is copy-on-write and
+-- the child usually needs far less than the threshold. On 256 MB devices a flat
+-- 64 MB floor rejects nearly every prefetch, so scale it with total RAM and keep
+-- a small floor for the child's own allocations.
+local MIN_AVAILABLE_FLOOR_KB = 16 * 1024
+local MIN_AVAILABLE_CEIL_KB = 64 * 1024
 local DEFAULT_TIMEOUT_SECONDS = 180
 local DEFAULT_CANCEL_GRACE_SECONDS = 5
 local DEFAULT_POLL_INTERVAL = 0.25
@@ -58,6 +64,24 @@ local function available_memory_kb(raw)
     end
 end
 
+local function total_memory_kb(raw)
+    local values = {}
+    for key, value in tostring(raw or ""):gmatch("([%a_]+):%s*(%d+)%s*kB") do
+        values[key] = tonumber(value)
+    end
+    return values.MemTotal
+end
+
+-- Free-memory floor for launching the prefetch child, scaled to total RAM:
+-- 1/8 of total, clamped to [16 MB, 64 MB]. A 256 MB device gets 32 MB instead
+-- of the old flat 64 MB.
+local function adaptive_min_available_kb(total_kb)
+    if not total_kb then return DEFAULT_MIN_AVAILABLE_KB end
+    local scaled = math.floor(total_kb / 8)
+    return math.max(MIN_AVAILABLE_FLOOR_KB,
+        math.min(MIN_AVAILABLE_CEIL_KB, scaled))
+end
+
 local function memory_error(value)
     local text = tostring(value or ""):lower()
     return text:find("cannot allocate memory", 1, true)
@@ -85,21 +109,23 @@ end
 
 function Worker:new(options)
     options = options or {}
+    local read_memory = options.read_memory or function()
+        return read_file("/proc/meminfo")
+    end
+    local min_available_kb = tonumber(options.min_available_kb)
+        or adaptive_min_available_kb(total_memory_kb(read_memory()))
     local obj = setmetatable({
         scheduler = options.scheduler or UIManager,
         runner = options.runner or default_runner(),
         temp_dir = assert(options.temp_dir, "worker temp_dir required"),
-        min_available_kb = tonumber(options.min_available_kb)
-            or DEFAULT_MIN_AVAILABLE_KB,
+        min_available_kb = min_available_kb,
         timeout = tonumber(options.timeout) or DEFAULT_TIMEOUT_SECONDS,
         cancel_grace = tonumber(options.cancel_grace)
             or DEFAULT_CANCEL_GRACE_SECONDS,
         poll_interval = tonumber(options.poll_interval)
             or DEFAULT_POLL_INTERVAL,
         now = options.now or os.time,
-        read_memory = options.read_memory or function()
-            return read_file("/proc/meminfo")
-        end,
+        read_memory = read_memory,
         sequence = 0,
     }, self)
     if not ensure_dir(obj.temp_dir) then obj.runner = nil end
@@ -345,5 +371,7 @@ function Worker:_poll()
 end
 
 Worker.available_memory_kb = available_memory_kb
+Worker.total_memory_kb = total_memory_kb
+Worker.adaptive_min_available_kb = adaptive_min_available_kb
 
 return Worker

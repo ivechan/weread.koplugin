@@ -417,6 +417,26 @@ function M:getSettingsMenuItems()
                             end),
                     },
                     {
+                        text = _("Continue to next chapter automatically"),
+                        keep_menu_open = true,
+                        check_callback_updates_menu = true,
+                        checked_func = function()
+                            return self.settings:get("cache").auto_next_chapter ~= false
+                        end,
+                        callback = self:safeCallback(
+                            _("Continue to next chapter automatically"),
+                            function(touchmenu_instance)
+                                local cache = self.settings:get("cache")
+                                cache.auto_next_chapter =
+                                    not (cache.auto_next_chapter ~= false)
+                                self.settings:set("cache", cache)
+                                self.settings:flush()
+                                if touchmenu_instance then
+                                    touchmenu_instance:updateItems()
+                                end
+                            end),
+                    },
+                    {
                         text = _("Chapter prefetch"),
                         sub_item_table_func = function()
                             return {

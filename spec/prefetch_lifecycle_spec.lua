@@ -161,6 +161,49 @@ expect(not host:onWeReadSyncProgress(),
 expect(notices[1] and notices[1][2] == 1,
     "standalone sync gesture explains missing WeRead context")
 
+-- End-of-chapter auto-continue: on by default, no dialog when a next chapter
+-- exists; falls back to the dialog when disabled, at the last chapter, or when
+-- navigation cannot start.
+G_reader_settings = { readSetting = function() return nil end }
+
+local continued, dialogs = {}, 0
+host.openChapterForReading = function(_self, target_book, chapter)
+    continued[#continued + 1] = { book = target_book, chapter = chapter }
+    return true
+end
+host.showEndOfBookDialog = function() dialogs = dialogs + 1; return true end
+host.showInfo = function() end
+host.detectWeReadBook = function() return "book" end
+host._orig_onEndOfBook = function() return false end
+host.ui.document.file = "/cache/one.epub"
+
+cache.auto_next_chapter = true
+expect(host:handleEndOfBook(nil) == true, "end of chapter is handled")
+expect(#continued == 1 and continued[1].chapter == chapters[2],
+    "auto-continue opens the immediate next chapter")
+expect(dialogs == 0, "auto-continue does not show the end-of-book dialog")
+
+cache.auto_next_chapter = false
+continued, dialogs = {}, 0
+host:handleEndOfBook(nil)
+expect(#continued == 0 and dialogs == 1,
+    "disabling auto-continue restores the end-of-book dialog")
+
+cache.auto_next_chapter = true
+continued, dialogs = {}, 0
+book.cached_chapters["3"] = "/cache/three.epub"
+existing["/cache/three.epub"] = true
+host.ui.document.file = "/cache/three.epub"
+host:handleEndOfBook(nil)
+expect(#continued == 0 and dialogs == 1,
+    "the last chapter still shows the end-of-book dialog")
+
+continued, dialogs = {}, 0
+host.ui.document.file = "/cache/one.epub"
+host.openChapterForReading = function() return false end
+host:handleEndOfBook(nil)
+expect(dialogs == 1, "a navigation that cannot start falls back to the dialog")
+
 print(string.format(
     "prefetch_lifecycle_spec: %d checks, %d failure(s)", checks, failures))
 os.exit(failures == 0 and 0 or 1)

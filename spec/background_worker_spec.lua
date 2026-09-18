@@ -148,4 +148,37 @@ expect(not low_ok and low_err == "low_memory" and next_pid == launches_before,
 expect(low_result and low_result.available_kb == 32 * 1024,
     "low-memory result omitted available memory")
 
+-- The launch gate scales with total RAM so 256 MB devices are not rejected by
+-- a flat 64 MB floor.
+expect(BackgroundWorker.total_memory_kb(
+    "MemTotal: 262144 kB\nMemAvailable: 40960 kB\n") == 262144,
+    "total memory is parsed from meminfo")
+expect(BackgroundWorker.adaptive_min_available_kb(256 * 1024) == 32 * 1024,
+    "256 MB device scales the gate to 32 MB")
+expect(BackgroundWorker.adaptive_min_available_kb(512 * 1024) == 64 * 1024,
+    "512 MB device keeps a 64 MB cap")
+expect(BackgroundWorker.adaptive_min_available_kb(64 * 1024) == 16 * 1024,
+    "small device clamps to the 16 MB floor")
+expect(BackgroundWorker.adaptive_min_available_kb(nil) == 64 * 1024,
+    "unknown total memory falls back to the default gate")
+
+local function new_adaptive_worker(total_kb, available_kb)
+    return BackgroundWorker:new {
+        temp_dir = temp_dir, runner = runner, scheduler = scheduler,
+        now = function() return clock end,
+        read_memory = function()
+            return "MemTotal: " .. tostring(total_kb) .. " kB\n"
+                .. "MemAvailable: " .. tostring(available_kb) .. " kB\n"
+        end,
+    }
+end
+local small = new_adaptive_worker(256 * 1024, 40 * 1024)
+expect(small:start { task = function() return true end },
+    "256 MB device starts a prefetch with 40 MB free")
+callbacks[next_pid](); done[next_pid] = true; poll()
+local tiny = new_adaptive_worker(256 * 1024, 20 * 1024)
+local tiny_ok, tiny_err = tiny:start { task = function() return true end }
+expect(not tiny_ok and tiny_err == "low_memory",
+    "256 MB device still rejects a prefetch with 20 MB free")
+
 print(("background_worker_spec: %d checks"):format(checks))

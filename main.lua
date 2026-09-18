@@ -66,9 +66,9 @@ function WeReadPlugin:init()
     self.client = Client:new(self.settings)
     self.prefetch_worker = BackgroundWorker:new{
         temp_dir = self.settings.data_dir .. "/workers",
-        -- A soft launch gate, not a reservation: fork uses copy-on-write and
-        -- normally consumes far less than this on a 512 MB Kindle.
-        min_available_kb = 64 * 1024,
+        -- The free-memory launch gate is derived from total RAM inside
+        -- BackgroundWorker:new, so 256 MB devices get a lower floor than the
+        -- old flat 64 MB instead of rejecting nearly every prefetch.
     }
     self.downloader = Downloader:new{
         client = self.client,
