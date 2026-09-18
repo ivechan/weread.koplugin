@@ -196,7 +196,10 @@ function Worker:_launch(request)
         self:_complete(request, { ok = false, error = "low_memory" })
         return false, "low_memory"
     end
-    collectgarbage("collect")
+    -- Do not run a full collectgarbage("collect") here: it runs on the UI
+    -- thread and can pause the reader for a long time on a large or
+    -- memory-constrained heap. The child collects its own copy right after
+    -- fork, where the pause is off the UI thread (and low priority).
     local free_kb = self:availableMemoryKB()
     if free_kb and free_kb < self.min_available_kb then
         self:_complete(request, {
@@ -210,6 +213,7 @@ function Worker:_launch(request)
     local result_path = prefix .. ".result.json"
     local cancel_path = prefix .. ".cancel"
     local child = function()
+        collectgarbage("collect")
         local function cancelled()
             return lfs.attributes(cancel_path) ~= nil
         end

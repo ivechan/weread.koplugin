@@ -145,6 +145,24 @@ starts[1].options.on_start()
 starts[1].options.on_complete(false, "network error")
 expect(#notices == 1, "notification setting silences all prefetch notices")
 
+-- Low memory skips the background prefetch; end-of-chapter auto-continue will
+-- download the chapter on demand instead, avoiding fork/COW pressure.
+cache.show_prefetch_notifications = true
+starts = {}
+local free_kb = 40 * 1024
+host.prefetch_worker = {
+    min_available_kb = 32 * 1024,
+    availableMemoryKB = function() return free_kb end,
+}
+expect(host:maybePrefetchNextChapter("book") == false,
+    "low memory skips the background prefetch")
+expect(#starts == 0, "no prefetch is started when memory is tight")
+free_kb = 96 * 1024
+expect(host:maybePrefetchNextChapter("book") == true,
+    "ample memory resumes prefetching")
+expect(#starts == 1, "prefetch starts once memory headroom is restored")
+host.prefetch_worker = nil
+
 local legacy_single = {
     cached_file = "/cache/one.epub",
     cached_chapters = { ["1"] = "/cache/one.epub" },
