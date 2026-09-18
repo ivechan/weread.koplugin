@@ -38,6 +38,9 @@ local defaults = {
         -- Continue into the next chapter when the current one ends, downloading
         -- it on demand (foreground) when it is not cached or prefetched yet.
         auto_next_chapter = true,
+        -- A backward page turn at the very start of a single-chapter file opens
+        -- the previous chapter (landing at its end).
+        auto_previous_chapter = true,
         show_prefetch_notifications = true,
         show_annotations = true,
         -- When true, taps in the left/right edge zones never open thought popups
@@ -79,6 +82,11 @@ local defaults = {
     },
     advanced = {
         developer_logs = false,
+    },
+    ui = {
+        -- Open the WeRead bookshelf instead of the file browser when KOReader
+        -- starts, once per process.
+        open_bookshelf_on_start = false,
     },
     update = {
         auto_check = false,
@@ -169,6 +177,10 @@ function Settings:new()
         cache.auto_next_chapter = true
         cache_changed = true
     end
+    if cache.auto_previous_chapter == nil then
+        cache.auto_previous_chapter = true
+        cache_changed = true
+    end
     if cache.show_prefetch_notifications == nil then
         cache.show_prefetch_notifications = true
         cache_changed = true
@@ -191,6 +203,12 @@ function Settings:new()
     end
     if cache_changed then
         obj.store:saveSetting("cache", cache)
+        obj.store:flush()
+    end
+    local ui = obj.store:readSetting("ui", deepcopy(defaults.ui))
+    if ui.open_bookshelf_on_start == nil then
+        ui.open_bookshelf_on_start = false
+        obj.store:saveSetting("ui", ui)
         obj.store:flush()
     end
     local legacy_changed = false

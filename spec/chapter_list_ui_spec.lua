@@ -134,6 +134,31 @@ local reading_book = {
 host:showChapterList(reading_book)
 expect(catalog_view_data.current_index == 3,
     "chapter catalog opens at the chapter currently being read")
+
+local indexed_chapters = {}
+for index = 1, 7 do
+    indexed_chapters[index] = {
+        chapterUid = index, chapterIdx = index * 10,
+        title = "Chapter " .. index, wordCount = index * 100,
+    }
+end
+local original_load_chapters = host.loadChapters
+host.loadChapters = function(_self, _book, callback) callback(indexed_chapters) end
+local indexed_book = {
+    bookId = "book-5", title = "Book 5", cached_chapters = {}, chapter_idx = 30,
+}
+host:showChapterList(indexed_book)
+expect(catalog_view_data.current_index == 3,
+    "chapter index resolves the current chapter")
+host.loadChapters = original_load_chapters
+
+local progress_book = {
+    bookId = "book-6", title = "Book 6", cached_chapters = {}, progress = 50,
+}
+host:showChapterList(progress_book)
+expect(catalog_view_data.current_index == 4,
+    "the progress estimate resolves the current chapter")
+
 catalog_view_callbacks.on_select(chapters[1])
 expect(opened_chapter == chapters[1], "chapter row opens the selected chapter")
 expect(type(single_chapter_refresh) == "function",

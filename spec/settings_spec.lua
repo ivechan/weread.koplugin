@@ -91,6 +91,8 @@ expect(settings:get("update").prefer_proxy == true,
     "update proxy should be preferred by default")
 expect(settings:get("shelf").paginated == true,
     "bookshelf pagination should be enabled by default")
+expect(settings:get("ui").open_bookshelf_on_start == false,
+    "bookshelf should not open on start by default")
 local thought_popup = settings:get("thought_popup")
 expect(thought_popup.height_ratio == 0.70
     and thought_popup.font_size_relative == 0
@@ -119,6 +121,8 @@ expect(values.cache.download_book_images == false
     and values.cache.download_underlines_and_thoughts == false
     and values.cache.prefetch_annotations == false
     and values.cache.auto_prefetch_next_chapter == false
+    and values.cache.auto_next_chapter == true
+    and values.cache.auto_previous_chapter == true
     and values.cache.show_prefetch_notifications == true
     and values.cache.show_annotations == true
     and values.cache.download_images == nil,
