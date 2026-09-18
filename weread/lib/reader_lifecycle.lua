@@ -83,9 +83,24 @@ function M:handleEndOfBook(status_self)
     local current_idx, current_ch, is_full_book = self:getChapterInfoFromFile(book, file)
     local next_ch = (not is_full_book) and current_idx and book.chapters[current_idx + 1]
 
+    -- Auto-continue into the next chapter without a dialog. It downloads on
+    -- demand in the foreground, so it still works when the background prefetch
+    -- was skipped for low memory.
+    if next_ch and self.settings:get("cache").auto_next_chapter ~= false then
+        local started = self:openChapterForReading(book, next_ch, nil, function(reason)
+            if reason and reason ~= "cancelled" then
+                self:showTransientInfo(T(_("Could not open the next chapter: %1"),
+                    display_error(reason)), 2)
+            end
+        end)
+        if started then
+            return true
+        end
+    end
+
     if action == "next_file" then
         if next_ch then
-            self:openChapter(book, next_ch)
+            self:openChapterForReading(book, next_ch)
         else
             self:showInfo(_("You have reached the last chapter."))
         end
@@ -302,7 +317,7 @@ function M:maybePrefetchNextChapter(book_id)
                     and 0.1 or 1.1
                 UIManager:scheduleIn(retry_delay, function()
                     if self.ui.document and self.ui.document.file == source_file then
-                        self:downloadChapterAndRead(book, next_chapter)
+                        self:openChapterForReading(book, next_chapter)
                     end
                 end)
             end

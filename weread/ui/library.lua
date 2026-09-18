@@ -1495,6 +1495,41 @@ function M:openBookForReading(book)
     return false
 end
 
+-- Continue reading into a chapter with no confirmation dialogs. Cached and
+-- prefetched chapters open immediately; a missing chapter is downloaded in the
+-- foreground (visible and cancelable) and opened on completion. This is the
+-- reliable path on low-memory devices where the background prefetch worker is
+-- skipped, and it is what end-of-chapter navigation uses.
+function M:openChapterForReading(book, chapter, on_downloaded, on_failure)
+    if type(book) ~= "table" or type(chapter) ~= "table" then
+        if on_failure then on_failure("target_chapter_unavailable") end
+        return false
+    end
+    local chapter_uid = chapter.chapterUid or chapter.chapterId
+    local cached = chapter_uid and book.cached_chapters
+        and book.cached_chapters[tostring(chapter_uid)]
+    if cached and file_exists(cached) then
+        self:openFile(cached)
+        return true
+    end
+    if self.downloader:promotePrefetch(book, chapter) then
+        return true
+    end
+    return self.downloader:start(book, { chapter }, "chapter", {
+        single_chapter = true,
+        open_on_complete = true,
+        offer_read = false,
+        silent_completion = true,
+        on_complete = function(ok, value)
+            if ok then
+                if on_downloaded then on_downloaded(value) end
+            elseif on_failure then
+                on_failure(value)
+            end
+        end,
+    })
+end
+
 -- Open a chapter, preferring its cached file and falling back to a download.
 function M:openChapter(book, chapter, on_downloaded)
     local chapter_uid = chapter.chapterUid or chapter.chapterId
