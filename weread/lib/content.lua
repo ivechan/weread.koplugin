@@ -595,9 +595,12 @@ local function write_epub(path, entries)
             end
         end
         assert(archive:addFileFromMemory("mimetype", mimetype_data, mtime), archive.err)
-        assert(archive:setZipCompression("deflate"), archive.err)
         for _, entry in ipairs(entries) do
             if entry.name ~= "mimetype" then
+                -- Binary assets (images) are already compressed, so deflating
+                -- them wastes CPU for no size win. Text entries still deflate.
+                assert(archive:setZipCompression(
+                    entry.store and "store" or "deflate"), archive.err)
                 local added
                 if entry.path then
                     added = archive:addPath(
@@ -655,6 +658,7 @@ local function append_asset_entries(entries, assets)
             name = "OEBPS/images",
             path = disk_dir,
             recursive = true,
+            store = true,
         })
     end
 end
