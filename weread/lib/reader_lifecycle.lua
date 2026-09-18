@@ -12,6 +12,12 @@ local log_error = PluginUtil.log_error
 
 local M = {}
 
+-- Background prefetch forks the whole process, so keep comfortable free-memory
+-- headroom above the worker's hard launch gate. When memory is tight, skip the
+-- prefetch and let end-of-chapter auto-continue download the chapter on demand
+-- instead, which avoids the fork/COW pressure that makes the reader stutter.
+local PREFETCH_MEMORY_HEADROOM_KB = 24 * 1024
+
 -- KOReader v2026.03 assumes ReaderHighlight's visible box cache has already
 -- been populated when a tap arrives. During a fast document switch there is a
 -- short window after ReaderReady where the cache is still nil, and the native
@@ -222,10 +228,26 @@ function M:showPrefetchNotice(text, timeout)
     self:showTransientInfo(text, timeout or 1)
 end
 
+function M:_hasPrefetchMemory()
+    local worker = self.prefetch_worker
+    if not worker or type(worker.availableMemoryKB) ~= "function" then
+        return true
+    end
+    local free_kb = worker:availableMemoryKB()
+    if not free_kb then return true end
+    local gate = tonumber(worker.min_available_kb) or (64 * 1024)
+    return free_kb >= gate + PREFETCH_MEMORY_HEADROOM_KB
+end
+
 function M:maybePrefetchNextChapter(book_id)
     local cache = self.settings:get("cache")
     if cache.auto_prefetch_next_chapter ~= true or not book_id then
         self.downloader:cancelPrefetch("prefetch_not_applicable")
+        return false
+    end
+    if not self:_hasPrefetchMemory() then
+        self.downloader:cancelPrefetch("low_memory")
+        logger.info("skipped: low_memory")
         return false
     end
 

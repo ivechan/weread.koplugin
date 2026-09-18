@@ -148,6 +148,26 @@ expect(not low_ok and low_err == "low_memory" and next_pid == launches_before,
 expect(low_result and low_result.available_kb == 32 * 1024,
     "low-memory result omitted available memory")
 
+-- The pre-fork path must not run a full GC on the UI thread; the forked child
+-- collects its own copy instead. Spying needs to replace the global.
+-- luacheck: push ignore 121
+local real_gc = collectgarbage
+local full_gc = 0
+collectgarbage = function(cmd, ...)
+    if cmd == "collect" then full_gc = full_gc + 1 end
+    return real_gc(cmd, ...)
+end
+local gc_worker = new_worker(512 * 1024)
+expect(gc_worker:start { task = function() return true end },
+    "worker did not start for the GC check")
+expect(full_gc == 0, "pre-fork path must not run a full GC on the UI thread")
+callbacks[next_pid]()
+expect(full_gc == 1, "the child runs the full GC off the UI thread")
+done[next_pid] = true
+poll()
+collectgarbage = real_gc
+-- luacheck: pop
+
 -- The launch gate scales with total RAM so 256 MB devices are not rejected by
 -- a flat 64 MB floor.
 expect(BackgroundWorker.total_memory_kb(
