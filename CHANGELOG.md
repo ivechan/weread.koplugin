@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [1.4.7]
+
 - 插件自更新改为从本仓库（ivechan/weread.koplugin）的 GitHub Release 检查与下载。
 
 ## [1.4.6]
