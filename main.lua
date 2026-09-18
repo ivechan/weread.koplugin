@@ -23,6 +23,11 @@ local UpdaterUI = require("weread.ui.updater")
 
 local _ = PluginUtil.tr
 
+-- The first plugin instance in a process belongs to whatever UI KOReader
+-- started with. Remember that so "open bookshelf on start" only fires for the
+-- initial file manager, not when a book is closed back to it later.
+local startup_ui_seen = false
+
 local WeReadPlugin = WidgetContainer:extend{
     name = "weread",
     is_doc_only = false,
@@ -214,6 +219,23 @@ function WeReadPlugin:init()
         self.read_report:maybe_start("plugin_start")
     end
     self._reader_session_gen = 0
+
+    -- Optionally open the bookshelf instead of the file browser on startup.
+    -- Only the first UI of the process qualifies, and only when it is the file
+    -- manager (no document is open).
+    local is_startup_ui = not startup_ui_seen
+    startup_ui_seen = true
+    local ui_settings = self.settings:get("ui") or {}
+    if is_startup_ui
+        and self.ui and self.ui.document == nil
+        and ui_settings.open_bookshelf_on_start == true then
+        UIManager:scheduleIn(0.3, function()
+            if self.ui and self.ui.document == nil then
+                self:showBookshelf()
+            end
+        end)
+    end
+
     self.updater:schedule_auto_check()
     logger.info("initialized:", "version=", self.version)
     updater:cleanup_backup()
