@@ -179,6 +179,49 @@ expect(closed == 1 and returned_to_parent,
 expect(catalog_view_data.status_of(catalog_view_data.chapters[1]) == "Cached",
     "successful multi-download refreshes cached chapter status")
 
+-- openChapterForReading: end-of-chapter navigation has no confirmation dialog.
+local opened_file
+local promote_result = false
+local started_downloads = {}
+host.openFile = function(_self, path) opened_file = path end
+host.downloader = {
+    promotePrefetch = function() return promote_result end,
+    start = function(_self, target_book, target_chapters, suffix, options)
+        started_downloads[#started_downloads + 1] = {
+            book = target_book, chapters = target_chapters,
+            suffix = suffix, options = options,
+        }
+        return true
+    end,
+}
+local read_book = { bookId = "read-book", cached_chapters = {} }
+existing_files["/cache/read-1.epub"] = true
+read_book.cached_chapters["1"] = "/cache/read-1.epub"
+opened_file, started_downloads = nil, {}
+promote_result = false
+expect(host:openChapterForReading(read_book, chapters[1]) == true,
+    "reading a cached chapter is accepted")
+expect(opened_file == "/cache/read-1.epub" and #started_downloads == 0,
+    "a cached chapter opens directly without downloading")
+
+opened_file, started_downloads = nil, {}
+promote_result = true
+host:openChapterForReading(read_book, chapters[2])
+expect(opened_file == nil and #started_downloads == 0,
+    "an active prefetch is promoted instead of restarted")
+
+opened_file, started_downloads = nil, {}
+promote_result = false
+expect(host:openChapterForReading(read_book, chapters[2]) == true
+    and opened_file == nil,
+    "an uncached chapter starts a foreground download")
+expect(#started_downloads == 1 and started_downloads[1].chapters[1] == chapters[2],
+    "the foreground download targets the requested chapter")
+expect(started_downloads[1].options.open_on_complete == true
+    and started_downloads[1].options.offer_read == false
+    and started_downloads[1].options.silent_completion == true,
+    "foreground reading download opens on completion without prompts")
+
 print(string.format(
     "chapter_list_ui_spec: %d checks, %d failure(s)", checks, failures))
 os.exit(failures == 0 and 0 or 1)

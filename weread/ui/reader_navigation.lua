@@ -90,7 +90,7 @@ function M:showEndOfBookDialog(book_id)
         end,
         on_next = function()
             if next_chapter then
-                self:openChapter(book, next_chapter)
+                self:openChapterForReading(book, next_chapter)
             elseif is_regular_weread_book then
                 self:showTransientInfo(_("You have reached the last chapter."), 1)
             else
