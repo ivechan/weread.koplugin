@@ -385,4 +385,21 @@ sync:onResume()
 expect(sync.active == false and #scheduled == 0,
     "resume without a document should do nothing")
 
+-- onPosUpdate mirrors onPageUpdate for chapter changes.
+sync = make_sync()
+sync.current_chapter_uid = "1"
+_G.__local_position = { percent = 10, chapter_uid = 3, book_id = "book" }
+scheduled = {}
+sync:onPosUpdate()
+expect(#scheduled == 1, "onPosUpdate should detect a chapter change")
+
+-- runOnce is not reentrant.
+_G.__local_position = { percent = 50, chapter_uid = 2, book_id = "book" }
+_G.__remote_percent = 48
+sync = make_sync()
+sync.running = true
+requests = {}
+sync:runOnce()
+expect(#requests == 0, "runOnce must not start while a run is already active")
+
 print(("smart_progress_sync_spec: %d checks"):format(checks))
