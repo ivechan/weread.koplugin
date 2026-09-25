@@ -363,20 +363,29 @@ end
 -- annotation job in a child: matching uses the open document, and completed
 -- thought batches must be committed by the parent before starting the next one.
 function M:_runAnnotationNetwork(request, task)
+    local ok_json, Json = pcall(require, "json")
+    if not ok_json then Json = require("rapidjson") end
     local WorkerSettings = require("weread.lib.worker_settings")
     local fingerprint = WorkerSettings.fingerprint(self.settings)
-    local completed, result = request.trapper:dismissableRunInSubprocess(function()
+    local completed, encoded = request.trapper:dismissableRunInSubprocess(function()
         local auth_result = WorkerSettings.capture(self.settings)
-        local ok, values = xpcall(function() return { task() } end, debug.traceback)
-        return { ok = ok, values = values, auth = auth_result() }
-    end, request.progress)
+        local ok, values = xpcall(function()
+            local first, second, third = task()
+            -- Named slots preserve nil holes without turning them into JSON null.
+            return { first = first, second = second, third = third }
+        end, debug.traceback)
+        -- LuaJSON represents null as a function, which Trapper's binary table
+        -- serializer rejects. Send JSON over its existing plain-string pipe.
+        return Json.encode({ ok = ok, values = values, auth = auth_result() })
+    end, request.progress, true)
     request.progress.dismiss_callback = nil
     if self._external_annotation_sync ~= request or request.cancelled then return end
     if not completed then error("could not start annotation worker") end
-    if not result then error("annotation worker returned no result") end
+    if not encoded or encoded == "" then error("annotation worker returned no result") end
+    local result = Json.decode(encoded)
     if result.auth then WorkerSettings.merge(self.settings, fingerprint, result.auth) end
     if not result.ok then error(result.values, 0) end
-    return result.values
+    return { result.values.first, result.values.second, result.values.third }
 end
 
 function M:_runAnnotationJob(context, options)
@@ -467,7 +476,17 @@ function M:_runAnnotationJob(context, options)
                 context.statuses[key] = { stats = projection.stats, revision = projection.revision,
                     matcher_version = projection.matcher_version, range_key = projection.range_key }
                 context.generation = (context.generation or 0) + 1
+                -- Activate each committed chapter before the next request can
+                -- fail or be paused, including books with old embedded markup.
+                local activate = not self._unified_annotations_active
+                    and (tonumber(projection.stats.located) or 0) > 0
+                if activate then
+                    context.store:put(context.book_id, "display", context.document_key, true)
+                    self._unified_annotations_active = true
+                    if self._xpointer_overlay then self._xpointer_overlay._annotation_window = nil end
+                end
                 self:_refreshAnnotationOverlay()
+                if activate then self:applyAnnotationVisibility() end
                 UIManager:setDirty(self.dialog, "ui")
             end
         end,
@@ -513,20 +532,8 @@ function M:_runAnnotationJob(context, options)
                     context.store:pruneCatalog(context.book_id, prune_catalog)
                     context.store:put(context.book_id, "meta", "prune_catalog", nil)
                 end
-                local summary = self:_annotationSummary(context)
-                -- A chapter selected from the picker is immediately usable.
-                -- Do not wait for every mapped chapter in the document before
-                -- activating the projection that was just created.
-                if summary.located > 0 then
-                    context.store:put(context.book_id, "display", context.document_key, true)
-                    if not self._unified_annotations_active then
-                        self._unified_annotations_active = true
-                        if self._xpointer_overlay then self._xpointer_overlay._annotation_window = nil end
-                        self:_refreshAnnotationOverlay()
-                        self:applyAnnotationVisibility()
-                    end
-                end
                 if done and not options.background then
+                    local summary = self:_annotationSummary(context)
                     self:showInfo(T(_("Matched %1/%2 underlines in %3/%4 chapters."),
                         tostring(summary.located), tostring(summary.total),
                         tostring(summary.chapters), tostring(#context.chapters)))
@@ -790,21 +797,22 @@ function M:_chooseAnnotationChapterMatch(context, node, on_saved)
         end
     end
     local items = {}
-    if node.chapter then
-        items[#items + 1] = { text = _("Remove this chapter match"), callback = function() save(false) end }
-    end
     for _index, chapter in ipairs(context.catalog) do
         local uid = Chapters.uid(chapter)
         local range = context.ranges[uid]
         local occupied = range and range.start_xpointer ~= node.xpointer
         local title = string.rep("  ", math.min(5, math.max(0, (tonumber(chapter.level) or 1) - 1)))
             .. (chapter.title or uid)
-        if occupied then title = title .. " · " .. T(_("Linked to: %1"), range.title or range.toc_index) end
-        items[#items + 1] = { text = title, dim = occupied, select_enabled = not occupied,
-            mandatory = range and not occupied and _("Current") or nil,
+        local current = range ~= nil and not occupied
+        items[#items + 1] = { text = title, select_enabled = not occupied, current = current,
+            detail = range and T(_("Local: %1"), range.title or range.toc_index) or _("No local chapter linked"),
+            status = current and "✓ " .. _("Current match") or occupied and _("Already linked") or _("Available"),
             callback = function() if not occupied then save(uid) end end }
     end
-    menu = self:showList(_("Choose WeRead chapter"), items, nil, { subtitle = node.title })
+    menu = require("weread.ui.annotation_chapter_picker").show{
+        choices = items, local_title = node.title,
+        on_remove = node.chapter and function() save(false) end or nil,
+    }
     return menu
 end
 

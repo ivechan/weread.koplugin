@@ -409,14 +409,16 @@ do
         settings = { get = function() return {} end },
         _xpointer_overlay = { records = {}, setRecords = function(self, records) self.records = records end },
     }, { __index = host })
-    local menu_items, updated_model, closed_menu
+    local menu_items, menu_options, updated_model, closed_menu
     local menu_token = {}
     local manager = require("ui/uimanager")
     local close = manager.close
     manager.close = function(_self, widget) closed_menu = widget end
-    mapping_host.showList = function(_self, title, items)
-        assert(title == "Choose WeRead chapter")
-        menu_items = items
+    local picker = require("weread.ui.annotation_chapter_picker")
+    local show_picker = picker.show
+    picker.show = function(options)
+        if not options.choices then return show_picker(options) end
+        menu_items, menu_options = options.choices, options
         return menu_token
     end
     local network_calls = calls
@@ -435,7 +437,9 @@ do
     options = picker_options
     assert(options.model.by_uid.a.xpointer == "10" and options.model.count == 0, "mapping did not survive reopen")
     options.on_edit(options.model.nodes[3], function(result) updated_model = result end)
-    assert(menu_items[1].select_enabled == false and menu_items[1].text:find("Local A", 1, true))
+    assert(menu_items[1].select_enabled == false and menu_items[1].detail:find("Local A", 1, true)
+        and menu_items[1].text == "Remote A" and menu_items[1].status == "Already linked",
+        "occupied mapping must be a separate detail, not part of the chapter title")
     menu_items[1].callback()
     assert(not store:get("manual", "chapter_mapping", doc_key)["20"], "occupied chapter was reused")
     menu_items[2].callback()
@@ -466,7 +470,9 @@ do
     mapping_host:chooseAnnotationChapters()
     options = picker_options
     options.on_edit(options.model.by_uid.a, function(result) updated_model = result end)
-    menu_items[1].callback()
+    assert(#menu_items == 2 and menu_items[1].current and menu_options.on_remove,
+        "remove action must be separate from catalog choices")
+    menu_options.on_remove()
     assert(not updated_model.by_uid.a and not store:get("manual", "projection", key)
         and not store:get("manual", "matching", key), "statusless old coordinates survived a mapping change")
     assert(store:get("manual", "chapter_mapping", doc_key)["10"] == false)
@@ -482,6 +488,7 @@ do
     assert(store:get("manual", "chapter_mapping", doc_key)["10"] == false)
     assert(calls == network_calls, "manual matching performed network work")
     manager.close = close
+    picker.show = show_picker
 end
 -- Foreground HTTP must yield outside Sync.thread, so cancel can terminate the
 -- suspended request without resuming the pipeline early or committing late data.
@@ -548,7 +555,7 @@ do
     local function start(uid, options)
         context = { path = "single", book_id = "cancel", document_key = "cancel-key", store = store,
             binding = { book_id = "cancel", title = "Cancel" }, statuses = {},
-            chapters = { { chapterUid = uid } }, ranges = {} }
+            chapters = type(uid) == "table" and uid or { { chapterUid = uid } }, ranges = {} }
         host._annotation_context = context
         host:_runAnnotationJob(context, options)
         local request = host._external_annotation_sync
@@ -622,6 +629,26 @@ do
     start("launch-failure")
     assert(not pending and not host._external_annotation_sync and prevented == allowed)
     fail_start = false
+
+    -- A later worker failure must not hide already committed chapters. This
+    -- also covers old downloaded books whose embedded annotations are gated.
+    host._unified_annotations_active = false
+    store:put("cancel", "display", "cancel-key", nil)
+    local partial = { { chapterUid = "partial-1" }, { chapterUid = "partial-2" } }
+    start(partial)
+    context.binding.automatic = true
+    complete_child(); complete_child(); complete_child()
+    assert(pending and store:get("cancel", "status", "cancel-key:partial-1"))
+    assert(host._unified_annotations_active and store:get("cancel", "display", "cancel-key")
+        and #host._xpointer_overlay.records > 0, "completed chapter hidden until the entire job finishes")
+    resume_child(nil); drain()
+    assert(not host._external_annotation_sync and #host._xpointer_overlay.records > 0
+        and store:get("cancel", "source", "partial-1"), "worker failure lost completed chapter")
+    local resumed_from = #requested
+    start(partial)
+    complete_child(); complete_child(); complete_child()
+    assert(not pending and not host._external_annotation_sync and #requested == resumed_from + 3,
+        "resuming refetched the completed chapter")
 
     -- A concurrent login change wins over auth captured by an older worker.
     returned_auth = { cookies = { session = "old-child" } }
