@@ -211,6 +211,8 @@ function WeReadPlugin:init()
     self.ui.menu:registerToMainMenu(self)
     self.integrations = Integrations
     self.integrations.register(self)
+    self.ui:registerModule("weread_smart_progress_sync",
+        require("weread.lib.smart_progress_sync"):new{ plugin = self })
     local read_report = self.settings:get("read_report")
     if read_report.enabled
         and read_report.mode == "manual"

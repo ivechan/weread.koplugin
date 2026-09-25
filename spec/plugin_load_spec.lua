@@ -195,6 +195,17 @@ package.preload["weread.ui.reader_navigation"] = function()
     }
 end
 
+local smart_sync_options
+package.preload["weread.lib.smart_progress_sync"] = function()
+    return {
+        new = function(_self, options)
+            smart_sync_options = options
+            return options
+        end,
+    }
+end
+
+local registered_module
 local Plugin = dofile("main.lua")
 local plugin = setmetatable({
     ui = {
@@ -203,6 +214,9 @@ local plugin = setmetatable({
                 menu_registered = registered_plugin ~= nil
             end,
         },
+        registerModule = function(_self, name, module)
+            registered_module = { name = name, module = module }
+        end,
     },
 }, { __index = Plugin })
 plugin:init()
@@ -220,6 +234,10 @@ expect(plugin.qr_login.kind == "qr_login", "QR login service was not initialized
 expect(migrations_ran, "migrations did not run during initialization")
 expect(dispatcher_registered, "dispatcher actions were not registered")
 expect(menu_registered, "plugin was not registered in KOReader's main menu")
+expect(registered_module
+    and registered_module.name == "weread_smart_progress_sync"
+    and smart_sync_options.plugin == plugin,
+    "smart progress sync module was not registered")
 expect(backup_cleaned,
     "successful plugin initialization did not clean the update backup")
 expect(#scheduled == 1 and scheduled[1].delay == 0.3,
