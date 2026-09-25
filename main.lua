@@ -31,7 +31,7 @@ local startup_ui_seen = false
 local WeReadPlugin = WidgetContainer:extend{
     name = "weread",
     is_doc_only = false,
-    version = "1.4.8",
+    version = "1.5.1",
 }
 
 -- Stable entry point used by third-party launchers such as SimpleUI and ZenUI.
