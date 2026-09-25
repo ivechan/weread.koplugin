@@ -234,4 +234,120 @@ sync.current_chapter_uid = "2"
 sync:onPageUpdate()
 expect(#scheduled == 0, "staying in the same chapter should not schedule a run")
 
+local function count(pred)
+    local n = 0
+    for _i, handle in ipairs(requests) do
+        if pred(handle) then n = n + 1 end
+    end
+    return n
+end
+local function is_read_request(body)
+    return function(handle)
+        return handle.req.url == "https://weread.qq.com/web/book/read"
+            and handle.req.body == body
+    end
+end
+
+-- Closing the document stops the sync and cancels the timer.
+_G.__remote_percent = 48
+sync = make_sync()
+sync:onReaderReady()
+unscheduled = 0
+sync:onCloseDocument()
+expect(sync.active == false, "closing the document should deactivate the sync")
+expect(unscheduled >= 1, "closing the document should cancel the timer")
+
+-- Missing cookie: only the gateway source is queried and no push happens.
+_G.__local_position = { percent = 50, chapter_uid = 2, book_id = "book" }
+_G.__remote_percent = 48
+sync = make_sync({ cookie = false })
+requests = {}
+sync:runOnce()
+expect(#requests == 1, "without a cookie only the gateway should be queried")
+respond_to_pulls()
+expect(count(is_read_request("J50")) == 0, "without a cookie the push must be skipped")
+
+-- Missing API key: only the web source is queried.
+sync = make_sync({ api_key = "" })
+requests = {}
+sync:runOnce()
+expect(#requests == 1, "without an API key only the web source should be queried")
+
+-- Push payload carries the local position (not the book's last known one).
+_G.__local_position = { percent = 49, chapter_uid = 2, book_id = "book" }
+_G.__remote_percent = 48
+sync = make_sync()
+requests = {}
+sync:runOnce()
+respond_to_pulls()
+expect(count(is_read_request("J49")) == 1,
+    "the pushed payload should carry the current local position")
+
+-- The reader-enter handshake is sent once per book per session.
+for _i, handle in ipairs(requests) do
+    if handle.req.body == "Jtrue" then
+        handle.callbacks.on_done(200, {}, "ok")
+    end
+end
+expect(count(is_read_request("Jtrue")) == 1, "the enter handshake should be sent once")
+sync:runOnce()
+respond_to_pulls()
+expect(count(is_read_request("Jtrue")) == 1,
+    "the enter handshake must not repeat within a session")
+
+-- stop() cancels requests that are still in flight.
+_G.__local_position = { percent = 50, chapter_uid = 2, book_id = "book" }
+_G.__remote_percent = 48
+sync = make_sync()
+requests = {}
+sync:runOnce()
+local inflight = sync.handles
+expect(#inflight == 2, "the two pulls should be in flight")
+sync:stop()
+expect(inflight[1].cancelled and inflight[2].cancelled,
+    "stop() should cancel in-flight requests")
+
+-- runOnce no-ops when inactive, without a book, chapters or local position.
+sync = make_sync()
+sync.active = false
+requests = {}
+sync:runOnce()
+expect(#requests == 0, "an inactive sync must not run")
+
+sync = make_sync({ books = {} })
+requests = {}
+sync:runOnce()
+expect(#requests == 0, "a missing book record must not run")
+
+sync = make_sync()
+sync.plugin.ensureChaptersLoaded = function() return {} end
+requests = {}
+sync:runOnce()
+expect(#requests == 0, "a missing catalog must not run")
+
+sync = make_sync()
+_G.__local_position = nil
+requests = {}
+sync:runOnce()
+expect(#requests == 0, "a missing local position must not run")
+
+-- A reading update without a chapter uid does not schedule a run.
+_G.__local_position = { percent = 10, book_id = "book" }
+sync = make_sync()
+sync.current_chapter_uid = nil
+scheduled = {}
+sync:onPageUpdate()
+expect(#scheduled == 0, "a position without a chapter uid should not schedule a run")
+
+-- Official-account articles and non-WeRead documents stop the sync.
+_G.__local_position = { percent = 10, chapter_uid = 2, book_id = "book" }
+sync = make_sync({ book_id = "MP_WXS_123" })
+sync:onReaderReady()
+expect(sync.active == false, "an MP article should stop the sync")
+
+sync = make_sync()
+sync.plugin.detectWeReadBook = function() return nil end
+sync:onReaderReady()
+expect(sync.active == false, "a non-WeRead document should stop the sync")
+
 print(("smart_progress_sync_spec: %d checks"):format(checks))
