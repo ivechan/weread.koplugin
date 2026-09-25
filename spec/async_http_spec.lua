@@ -109,9 +109,11 @@ package.preload["socket.url"] = function()
         absolute = function(_base, location) return location end,
     }
 end
+local last_ssl_params
 package.preload["ssl"] = function()
     return {
-        wrap = function(sock)
+        wrap = function(sock, params)
+            last_ssl_params = params
             sock.tls = true
             return sock
         end,
@@ -217,13 +219,40 @@ result = run({ url = "http://example.com/loop" })
 expect(result.error == "too many redirects",
     "a redirect loop should stop, got " .. tostring(result.error))
 
--- HTTPS goes through the TLS wrap/handshake path.
+-- HTTPS goes through the TLS wrap/handshake path with client, unverified params.
+last_ssl_params = nil
 socket = new_socket("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi")
 socket_factory = function() return socket end
 result = run({ url = "https://example.com/secure" })
 expect(result[1] == 200 and result[3] == "hi" and socket.tls,
     "the HTTPS/TLS path did not complete")
 expect(sent:find("GET /secure HTTP/1.1", 1, true) ~= nil, "HTTPS request line was wrong")
+expect(last_ssl_params and last_ssl_params.mode == "client"
+    and last_ssl_params.verify == "none",
+    "TLS parameters were not set as expected")
+
+-- An oversized response is rejected instead of buffered without bound.
+local too_big = 4 * 1024 * 1024 + 1
+socket = new_socket("HTTP/1.1 200 OK\r\nContent-Length: " .. tostring(too_big)
+    .. "\r\n\r\n" .. string.rep("a", too_big))
+socket_factory = function() return socket end
+result = run({ url = "http://example.com/big" })
+expect(result.error == "response too large",
+    "an oversized response should be rejected, got " .. tostring(result.error))
+
+-- A callback that throws does not propagate out of the client.
+socket = new_socket("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+socket_factory = function() return socket end
+scheduled, clock = {}, 0
+local callback_ran = false
+AsyncHttp.request({ url = "http://example.com/cb" }, {
+    on_done = function()
+        callback_ran = true
+        error("callback boom")
+    end,
+})
+pump_all()
+expect(callback_ran, "the throwing callback should still have been invoked")
 
 -- Connection failure is reported.
 socket = new_socket("", { connect_ok = false, connect_err = "connection refused" })

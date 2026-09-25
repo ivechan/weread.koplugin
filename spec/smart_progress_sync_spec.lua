@@ -350,4 +350,39 @@ sync.plugin.detectWeReadBook = function() return nil end
 sync:onReaderReady()
 expect(sync.active == false, "a non-WeRead document should stop the sync")
 
+-- Set-Cookie values from responses are merged back into settings.
+sync = make_sync()
+local merged
+sync.plugin.settings.merge_set_cookie = function(_self, value) merged = value end
+sync:_mergeSetCookie({ ["set-cookie"] = "a=1" })
+expect(merged == "a=1", "a single Set-Cookie header should be merged")
+merged = nil
+sync:_mergeSetCookie({ ["set-cookie"] = { "a=1", "b=2" } })
+expect(merged == "a=1, b=2", "multiple Set-Cookie headers should be joined")
+merged = nil
+sync:_mergeSetCookie({})
+expect(merged == nil, "a response without Set-Cookie should merge nothing")
+
+-- A conflict between the two remote sources (choose_remote -> nil) must not push.
+local PositionMapper = require("weread.lib.position_mapper")
+local original_choose = PositionMapper.choose_remote
+PositionMapper.choose_remote = function() return nil end
+_G.__local_position = { percent = 50, chapter_uid = 2, book_id = "book" }
+_G.__remote_percent = 48
+sync = make_sync()
+requests = {}
+sync:runOnce()
+respond_to_pulls()
+expect(count(is_read_request("J50")) == 0, "a source conflict must not push")
+PositionMapper.choose_remote = original_choose
+
+-- Resume without an open document does nothing.
+sync = make_sync()
+sync.ui.document = nil
+sync.active = false
+scheduled = {}
+sync:onResume()
+expect(sync.active == false and #scheduled == 0,
+    "resume without a document should do nothing")
+
 print(("smart_progress_sync_spec: %d checks"):format(checks))
