@@ -25,9 +25,14 @@ package.preload["ui/uimanager"] = function()
         scheduleIn = function(_self, delay, callback)
             local id = {}
             scheduled[#scheduled + 1] = { delay = delay, callback = callback, id = id }
-            return id
         end,
-        unschedule = function() unscheduled = unscheduled + 1 end,
+        unschedule = function(_self, callback)
+            expect(type(callback) == "function", "KOReader unschedules callbacks, not handles")
+            unscheduled = unscheduled + 1
+            for i = #scheduled, 1, -1 do
+                if scheduled[i].callback == callback then table.remove(scheduled, i) end
+            end
+        end,
     }
 end
 package.preload["weread.lib.logger"] = function()
@@ -192,7 +197,7 @@ sync:runOnce()
 respond_to_pulls()
 expect(read_request_body() == nil, "a far-ahead local position must not be pushed")
 
--- Missing reader session (psvts) skips the push instead of blocking to fetch it.
+-- Missing reader session (psvts) is fetched asynchronously before the push.
 _G.__local_position = { percent = 50, chapter_uid = 2, book_id = "book" }
 _G.__remote_percent = 48
 sync = make_sync({ books = { book = {
@@ -202,7 +207,12 @@ requests = {}
 sync:runOnce()
 respond_to_pulls()
 expect(read_request_body() == nil,
-    "a missing reader session must skip the push")
+    "a missing reader session must defer the push")
+expect(#requests == 3 and requests[3].req.method == "GET"
+    and requests[3].req.url == "https://weread.qq.com/web/reader/book",
+    "cached books without a session must fetch the reader page asynchronously")
+requests[3].callbacks.on_done(200, {}, '"psvts":"SESSION"')
+expect(read_request_body() ~= nil, "loading the missing session must continue the push")
 
 -- Timer: reader ready schedules the 5-minute timer and an immediate run;
 -- suspend clears it; resume restarts it.
@@ -463,5 +473,60 @@ respond_to_read(nil, "timeout")
 expect(#notifications == 1
     and notifications[1].text:find("Progress sync failed", 1, true) ~= nil,
     "a transport failure should notify the reader")
+
+-- A chapter transition during a slow pull must retry using the new position.
+sync = make_sync()
+requests, scheduled = {}, {}
+_G.__local_position = { percent = 49, chapter_uid = 1, book_id = "book" }
+sync.current_chapter_uid = "1"
+sync:runOnce()
+_G.__local_position = { percent = 50, chapter_uid = 2, book_id = "book" }
+sync:onPageUpdate()
+local chapter_callback = scheduled[#scheduled].callback
+scheduled = {}
+chapter_callback()
+respond_to_pulls()
+expect(read_request_body() == nil and #scheduled == 1,
+    "a busy chapter transition must defer stale progress and schedule a retry")
+scheduled[1].callback()
+requests = { requests[3], requests[4] }
+respond_to_pulls()
+expect(read_request_body() ~= nil, "the retry must upload the new chapter position")
+
+-- Closing/suspending during a pull must not wedge subsequent chapter opens.
+sync = make_sync()
+requests, scheduled = {}, {}
+sync:onReaderReady()
+sync:runOnce()
+local old_pulls = requests
+sync:onCloseDocument()
+expect(not sync.running and not sync.run_scheduled and #scheduled == 0,
+    "close must clear both scheduled callbacks and the running state")
+sync:onReaderReady()
+requests = {}
+sync:runOnce()
+for _, handle in ipairs(old_pulls) do handle.callbacks.on_done(200, {}, "body") end
+expect(sync.running and #requests == 2,
+    "late responses from a closed chapter must not upload or reset the new run")
+respond_to_pulls()
+expect(read_request_body() ~= nil, "the next chapter must sync after cancelling a pull")
+sync:onSuspend()
+sync:onResume()
+expect(sync.active and sync.run_scheduled ~= nil,
+    "resume must schedule a fresh comparison")
+
+sync = make_sync({ book_id = "MP_WXS_123" })
+sync:onResume()
+expect(not sync.active, "resume must not start sync for unsupported documents")
+
+-- A missing/failed reader page must not recurse or send an invalid read.
+for _, status in ipairs({200, 500}) do
+    sync = make_sync({ books = { book = { book_id = "book" } } })
+    requests = {}
+    sync:runOnce()
+    respond_to_pulls()
+    requests[3].callbacks.on_done(status, {}, "no session")
+    expect(#requests == 3, "an unusable session response must not upload")
+end
 
 print(("smart_progress_sync_spec: %d checks"):format(checks))

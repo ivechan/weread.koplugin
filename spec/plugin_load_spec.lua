@@ -238,6 +238,8 @@ expect(registered_module
     and registered_module.name == "weread_smart_progress_sync"
     and smart_sync_options.plugin == plugin,
     "smart progress sync module was not registered")
+expect(smart_sync_options.ui == plugin.ui,
+    "smart progress sync must receive the reader UI for resume")
 expect(backup_cleaned,
     "successful plugin initialization did not clean the update backup")
 expect(#scheduled == 1 and scheduled[1].delay == 0.3,

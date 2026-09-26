@@ -31,7 +31,7 @@ local startup_ui_seen = false
 local WeReadPlugin = WidgetContainer:extend{
     name = "weread",
     is_doc_only = false,
-    version = "1.5.4",
+    version = "1.5.5",
 }
 
 -- Stable entry point used by third-party launchers such as SimpleUI and ZenUI.
@@ -212,7 +212,7 @@ function WeReadPlugin:init()
     self.integrations = Integrations
     self.integrations.register(self)
     self.ui:registerModule("weread_smart_progress_sync",
-        require("weread.lib.smart_progress_sync"):new{ plugin = self })
+        require("weread.lib.smart_progress_sync"):new{ plugin = self, ui = self.ui })
     local read_report = self.settings:get("read_report")
     if read_report.enabled
         and read_report.mode == "manual"

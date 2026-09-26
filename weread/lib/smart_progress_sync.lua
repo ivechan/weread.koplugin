@@ -17,6 +17,7 @@ local AsyncHttp = require("weread.lib.async_http")
 local Cookie = require("weread.lib.cookie")
 local WeRead = require("weread.lib.protocol")
 local PositionMapper = require("weread.lib.position_mapper")
+local ReaderState = require("weread.lib.reader_state")
 local PluginUtil = require("weread.lib.plugin_util")
 local _ = PluginUtil.tr
 local T = PluginUtil.T
@@ -42,6 +43,7 @@ function SmartProgressSync:init()
     self.book_id = nil
     self.entered = {}
     self.handles = {}
+    self.generation = 0
 end
 
 function SmartProgressSync:_track(handle)
@@ -65,16 +67,24 @@ end
 
 function SmartProgressSync:_scheduleTimer()
     self:_clearTimer()
-    self.timer = UIManager:scheduleIn(INTERVAL_SECONDS, function()
+    self.timer = function()
         self.timer = nil
         if not self.active then return end
         self:runOnce()
         self:_scheduleTimer()
-    end)
+    end
+    UIManager:scheduleIn(INTERVAL_SECONDS, self.timer)
 end
 
 function SmartProgressSync:stop()
     self.active = false
+    self.generation = self.generation + 1
+    self.running = false
+    self.pending_run = false
+    if self.run_scheduled then
+        UIManager:unschedule(self.run_scheduled)
+        self.run_scheduled = nil
+    end
     self:_clearTimer()
     self:_cancelActive()
     self.current_chapter_uid = nil
@@ -90,11 +100,11 @@ end
 
 function SmartProgressSync:_scheduleRun(delay)
     if self.run_scheduled then return end
-    self.run_scheduled = true
-    UIManager:scheduleIn(delay, function()
+    self.run_scheduled = function()
         self.run_scheduled = nil
         if self.active then self:runOnce() end
-    end)
+    end
+    UIManager:scheduleIn(delay, self.run_scheduled)
 end
 
 function SmartProgressSync:_book()
@@ -126,6 +136,7 @@ function SmartProgressSync:_detectChapterChange()
 end
 
 function SmartProgressSync:onReaderReady()
+    self:stop()
     local book_id = self.plugin:detectWeReadBook()
     if not book_id or WeRead.is_mp_book(book_id) then
         self:stop()
@@ -162,8 +173,7 @@ end
 
 function SmartProgressSync:onResume()
     if self.ui and self.ui.document then
-        self.book_id = self.book_id or self.plugin:detectWeReadBook()
-        self:start()
+        self:onReaderReady()
     end
 end
 
@@ -313,6 +323,7 @@ end
 
 function SmartProgressSync:_postRead(book_id, payload, callback)
     local referer = WeRead.reader_url(book_id)
+    local generation = self.generation
     self:_track(AsyncHttp.request({
         url = "https://weread.qq.com/web/book/read",
         method = "POST",
@@ -329,11 +340,13 @@ function SmartProgressSync:_postRead(book_id, payload, callback)
         timeout = REQUEST_TIMEOUT,
     }, {
         on_done = function(status, headers, _body)
+            if generation ~= self.generation or not self.active then return end
             self:_mergeSetCookie(headers)
             local ok = status and status >= 200 and status < 300
             if callback then callback(ok == true, status) end
         end,
         on_error = function(err)
+            if generation ~= self.generation or not self.active then return end
             logger.dbg("smart sync push failed:", tostring(err))
             if callback then callback(false, err) end
         end,
@@ -349,10 +362,42 @@ end
 function SmartProgressSync:_pushProgress(book_id, book, position)
     if not self.plugin.settings:is_cookie_configured() then return end
     local psvts = tostring(book.psvts or "")
-    -- The read endpoint needs the Web reader session state (psvts). If it has
-    -- not been loaded yet we skip rather than doing a blocking reader-state
-    -- fetch on the UI thread; the existing pull-on-open will populate it.
-    if psvts == "" then return end
+    -- Pulling progress does not load a Web reader session. Cached chapters
+    -- must be able to sync even when no download/report has populated psvts.
+    if psvts == "" then
+        local generation = self.generation
+        local url = WeRead.reader_url(book_id)
+        self:_track(AsyncHttp.request({
+            url = url,
+            method = "GET",
+            headers = {
+                ["Referer"] = url,
+                ["User-Agent"] = WeRead.USER_AGENT,
+                ["Cookie"] = Cookie.to_header(self:_cookies()),
+            },
+            user_agent = WeRead.USER_AGENT,
+            timeout = REQUEST_TIMEOUT,
+        }, {
+            on_done = function(status, headers, body)
+                if generation ~= self.generation or not self.active then return end
+                self:_mergeSetCookie(headers)
+                local state = status and status >= 200 and status < 300
+                    and ReaderState.extract(body or "", function(encoded)
+                        return self.plugin.client:json_decode(encoded)
+                    end)
+                if not state or tostring(state.psvts or "") == "" then
+                    logger.dbg("smart sync reader session unavailable:", tostring(status))
+                    return
+                end
+                book.psvts, book.pclts, book.token = state.psvts, state.pclts, state.token
+                self:_pushProgress(book_id, book, position)
+            end,
+            on_error = function(err)
+                logger.dbg("smart sync reader session failed:", tostring(err))
+            end,
+        }))
+        return
+    end
 
     local pclts = book.pclts
     if pclts == nil or pclts == "" or tonumber(pclts) == 0 then
@@ -386,7 +431,11 @@ function SmartProgressSync.should_push(local_percent, remote_percent)
 end
 
 function SmartProgressSync:runOnce()
-    if self.running or not self.active then return end
+    if not self.active then return end
+    if self.running then
+        self.pending_run = true
+        return
+    end
     local book, book_id = self:_book()
     if not book then return end
     local chapters = self.plugin:ensureChaptersLoaded(book)
@@ -395,8 +444,15 @@ function SmartProgressSync:runOnce()
     if not position then return end
 
     self.running = true
+    local generation = self.generation
     self:_fetchRemote(book_id, chapters, function(remote)
+        if generation ~= self.generation or not self.active then return end
         self.running = false
+        if self.pending_run then
+            self.pending_run = false
+            self:_scheduleRun(CHAPTER_RUN_DELAY)
+            return
+        end
         if not remote then return end
         logger.dbg("smart sync compare:",
             "book=", tostring(book_id),
