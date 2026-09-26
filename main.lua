@@ -31,7 +31,7 @@ local startup_ui_seen = false
 local WeReadPlugin = WidgetContainer:extend{
     name = "weread",
     is_doc_only = false,
-    version = "1.5.7",
+    version = "1.5.8",
 }
 
 -- Stable entry point used by third-party launchers such as SimpleUI and ZenUI.
@@ -209,6 +209,7 @@ function WeReadPlugin:init()
     }
     self:onDispatcherRegisterActions()
     self.ui.menu:registerToMainMenu(self)
+    self:installBookshelfMenuTab()
     self.integrations = Integrations
     self.integrations.register(self)
     self.ui:registerModule("weread_smart_progress_sync",

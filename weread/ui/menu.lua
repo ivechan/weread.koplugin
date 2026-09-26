@@ -15,6 +15,53 @@ local T = PluginUtil.T
 
 local M = {}
 
+-- Add a direct-action tab after KOReader has applied its menu ordering, so
+-- both reader/file-manager menus and custom order files keep their layout.
+function M:installBookshelfMenuTab()
+    local menu = self.ui and self.ui.menu
+    if not menu or type(menu.setUpdateItemTable) ~= "function" then return end
+    menu._weread_bookshelf_plugin = self
+    if menu._weread_bookshelf_tab_installed then return end
+    menu._weread_bookshelf_tab_installed = true
+    local original = menu.setUpdateItemTable
+    menu.setUpdateItemTable = function(menu_self, ...)
+        local result = original(menu_self, ...)
+        local tabs = menu_self.tab_item_table
+        if type(tabs) ~= "table" then return result end
+        for _, tab in ipairs(tabs) do
+            if tab.id == "weread_bookshelf" then return result end
+        end
+        local index = #tabs + 1
+        for i, tab in ipairs(tabs) do
+            if tab.id == "main" then index = i; break end
+        end
+        table.insert(tabs, index, {
+            id = "weread_bookshelf",
+            text = _("WeRead bookshelf"),
+            icon = "book.opened",
+            remember = false,
+            callback = function()
+                if menu_self._weread_bookshelf_open_pending then return end
+                menu_self._weread_bookshelf_open_pending = true
+                -- Wait until TouchMenu finishes switching tabs before closing
+                -- its widgets and showing the bookshelf.
+                UIManager:scheduleIn(0, function()
+                    menu_self._weread_bookshelf_open_pending = nil
+                    local plugin = menu_self._weread_bookshelf_plugin
+                    plugin:safeCallback(_("WeRead bookshelf"), function()
+                        local container = menu_self.menu_container
+                        if container and container[1] then container[1]:closeMenu() end
+                        plugin:showBookshelf()
+                    end)()
+                end)
+            end,
+        })
+        return result
+    end
+    -- A menu may already have been built before this plugin was initialized.
+    menu.tab_item_table = nil
+end
+
 function M:onDispatcherRegisterActions()
     Dispatcher:registerAction("weread_quick_menu", {
         category = "none",

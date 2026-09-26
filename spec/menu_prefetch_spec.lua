@@ -422,6 +422,53 @@ sync_notification_item.callback()
 expect(sync_config.show_notifications == true and sync_notification_item.checked_func(),
     "sync notifications can be enabled again")
 
+-- The direct-action tab is inserted after ordering and survives menu rebuilds.
+local pending_tab_callbacks = {}
+local manager = require("ui/uimanager")
+local original_schedule = manager.scheduleIn
+manager.scheduleIn = function(_self, _delay, callback)
+    pending_tab_callbacks[#pending_tab_callbacks + 1] = callback
+end
+for _, has_document in ipairs({ false, true }) do
+    local menu_closed, shelf_opened = false, 0
+    local menu = {
+        tab_item_table = { { id = "stale" } },
+        setUpdateItemTable = function(self)
+            self.tab_item_table = { { id = "custom" }, { id = "main" } }
+            return "rebuilt"
+        end,
+        menu_container = { { closeMenu = function() menu_closed = true end } },
+    }
+    local plugin = {
+        ui = { menu = menu, document = has_document and {} or nil },
+        safeCallback = host.safeCallback,
+        showBookshelf = function()
+            expect(menu_closed, "top menu must close before the bookshelf opens")
+            shelf_opened = shelf_opened + 1
+        end,
+    }
+    Menu.installBookshelfMenuTab(plugin)
+    expect(menu.tab_item_table == nil, "installing the tab invalidates cached menus")
+    Menu.installBookshelfMenuTab(plugin)
+    for _ = 1, 2 do
+        expect(menu:setUpdateItemTable() == "rebuilt", "menu rebuild keeps its return value")
+        expect(#menu.tab_item_table == 3 and menu.tab_item_table[1].id == "custom"
+            and menu.tab_item_table[2].id == "weread_bookshelf"
+            and menu.tab_item_table[3].id == "main",
+            "reader and file-manager rebuilds preserve custom order and add exactly one tab")
+    end
+    local tab = menu.tab_item_table[2]
+    expect(tab.remember == false, "opening the menu must not auto-open the bookshelf")
+    tab.callback()
+    tab.callback()
+    expect(shelf_opened == 0 and #pending_tab_callbacks == 1,
+        "the bookshelf opens once after the current menu event finishes")
+    pending_tab_callbacks[1]()
+    pending_tab_callbacks = {}
+    expect(shelf_opened == 1, "one tap opens the bookshelf")
+end
+manager.scheduleIn = original_schedule
+
 print(string.format(
     "menu_prefetch_spec: %d checks, %d failure(s)", checks, failures))
 os.exit(failures == 0 and 0 or 1)

@@ -57,6 +57,23 @@ reader.rolling:onGotoPage(2)
 fastforward_ui_events()
 assert(reader:getCurrentPage() == 2, "real page turn")
 Screen:shot(home .. "/../evidence/mock-page-2.png")
+-- The real top-level tab must close the reader menu and open the bookshelf.
+reader.weread.library_db:cacheShelf(shelf.books, shelf.archive)
+reader.menu:onShowMenu(1)
+fastforward_ui_events()
+local bookshelf_tab_index
+for i, tab in ipairs(reader.menu.tab_item_table) do
+    if tab.id == "weread_bookshelf" then bookshelf_tab_index = i end
+end
+assert(bookshelf_tab_index, "bookshelf top-level tab must be registered")
+Screen:shot(home .. "/../evidence/mock-bookshelf-menu.png")
+reader.menu.menu_container[1]:switchMenuTab(bookshelf_tab_index)
+fastforward_ui_events()
+assert(reader.menu.menu_container == nil, "bookshelf tab must close the main menu")
+assert(reader.weread.shelf_view, "bookshelf tab must open the real shelf view")
+Screen:shot(home .. "/../evidence/mock-bookshelf-tab.png")
+reader.weread:closeWeReadUI()
+fastforward_ui_events()
 -- Exercise the real event loop, subprocesses, resume workspace, and packaging.
 local completed, full_path, download_error
 local function deadline()
@@ -80,6 +97,24 @@ local file = assert(io.open(full_path, "rb"))
 assert(file:read(2) == "PK", "full download must produce an EPUB ZIP")
 file:close()
 reader:onClose()
+local FileManager = require("apps/filemanager/filemanager")
+FileManager:showFiles(settings:get_download_dir())
+local filemanager = assert(FileManager.instance)
+filemanager.menu:onShowMenu(1)
+fastforward_ui_events()
+local filemanager_tab_index
+for i, tab in ipairs(filemanager.menu.tab_item_table) do
+    if tab.id == "weread_bookshelf" then filemanager_tab_index = i end
+end
+assert(filemanager_tab_index, "file-manager bookshelf tab must be registered")
+Screen:shot(home .. "/../evidence/mock-filemanager-menu.png")
+filemanager.menu.menu_container[1]:switchMenuTab(filemanager_tab_index)
+fastforward_ui_events()
+assert(filemanager.menu.menu_container == nil, "bookshelf tab must close file-manager menu")
+assert(filemanager.weread.shelf_view, "file-manager tab must open the real shelf view")
+Screen:shot(home .. "/../evidence/mock-filemanager-bookshelf.png")
+filemanager.weread:closeWeReadUI()
+filemanager:onClose()
 UIManager:quit()
 print("PASS: mock HTTP -> real Client/Content/Downloader -> EPUB with image/footnote -> ReaderUI -> page 2")
 print("EPUB: " .. path)

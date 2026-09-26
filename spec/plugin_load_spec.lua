@@ -164,6 +164,9 @@ package.preload["weread.ui.common"] = function()
 end
 package.preload["weread.ui.menu"] = function()
     return {
+        installBookshelfMenuTab = function(self)
+            self.bookshelf_menu_tab_installed = true
+        end,
         onDispatcherRegisterActions = function()
             dispatcher_registered = true
         end,
@@ -234,6 +237,7 @@ expect(plugin.qr_login.kind == "qr_login", "QR login service was not initialized
 expect(migrations_ran, "migrations did not run during initialization")
 expect(dispatcher_registered, "dispatcher actions were not registered")
 expect(menu_registered, "plugin was not registered in KOReader's main menu")
+expect(plugin.bookshelf_menu_tab_installed, "bookshelf tab was not installed")
 expect(registered_module
     and registered_module.name == "weread_smart_progress_sync"
     and smart_sync_options.plugin == plugin,
