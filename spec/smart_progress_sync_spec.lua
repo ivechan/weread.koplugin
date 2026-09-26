@@ -36,6 +36,19 @@ package.preload["weread.lib.logger"] = function()
 end
 
 local requests = {}
+local notifications = {}
+package.preload["weread.lib.plugin_util"] = function()
+    return {
+        tr = function(text) return text end,
+        T = function(text, ...)
+            local values = { ... }
+            return (text:gsub("%%(%d+)", function(index)
+                return tostring(values[tonumber(index)] or "")
+            end))
+        end,
+        display_error = function(value) return tostring(value) end,
+    }
+end
 package.preload["weread.lib.async_http"] = function()
     return {
         request = function(req, callbacks)
@@ -106,6 +119,9 @@ local function make_plugin(opts)
             capture_local = function() return _G.__local_position end,
         },
         read_report = { now = function() return 1000 end },
+        showTransientInfo = function(_self, text, timeout)
+            notifications[#notifications + 1] = { text = text, timeout = timeout }
+        end,
         detectWeReadBook = function() return opts.book_id or "book" end,
         ensureChaptersLoaded = function() return { { chapterUid = 1 }, { chapterUid = 2 } } end,
     }
@@ -401,5 +417,51 @@ sync.running = true
 requests = {}
 sync:runOnce()
 expect(#requests == 0, "runOnce must not start while a run is already active")
+
+local function respond_to_read(status, err)
+    for _i, handle in ipairs(requests) do
+        if handle.req.url == "https://weread.qq.com/web/book/read"
+            and handle.req.body == "J50" then
+            if err then
+                handle.callbacks.on_error(err)
+            else
+                handle.callbacks.on_done(status, {}, "body")
+            end
+        end
+    end
+end
+
+-- A successful push notifies the reader.
+_G.__local_position = { percent = 50, chapter_uid = 2, book_id = "book" }
+_G.__remote_percent = 48
+sync = make_sync()
+requests, notifications = {}, {}
+sync:runOnce()
+respond_to_pulls()
+respond_to_read(200)
+expect(#notifications == 1 and notifications[1].text == "Progress synced to WeRead",
+    "a successful push should notify the reader")
+expect(notifications[1].timeout == 2, "the success notice should use the short timeout")
+
+-- A rejected push notifies the reader with a failure.
+sync = make_sync()
+requests, notifications = {}, {}
+sync:runOnce()
+respond_to_pulls()
+respond_to_read(500)
+expect(#notifications == 1
+    and notifications[1].text:find("Progress sync failed", 1, true) ~= nil,
+    "a rejected push should notify the reader of the failure")
+expect(notifications[1].timeout == 3, "the failure notice should stay longer")
+
+-- A transport failure also notifies.
+sync = make_sync()
+requests, notifications = {}, {}
+sync:runOnce()
+respond_to_pulls()
+respond_to_read(nil, "timeout")
+expect(#notifications == 1
+    and notifications[1].text:find("Progress sync failed", 1, true) ~= nil,
+    "a transport failure should notify the reader")
 
 print(("smart_progress_sync_spec: %d checks"):format(checks))

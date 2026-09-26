@@ -17,6 +17,10 @@ local AsyncHttp = require("weread.lib.async_http")
 local Cookie = require("weread.lib.cookie")
 local WeRead = require("weread.lib.protocol")
 local PositionMapper = require("weread.lib.position_mapper")
+local PluginUtil = require("weread.lib.plugin_util")
+local _ = PluginUtil.tr
+local T = PluginUtil.T
+local display_error = PluginUtil.display_error
 
 local SmartProgressSync = WidgetContainer:extend{
     name = "weread_smart_progress_sync",
@@ -331,9 +335,15 @@ function SmartProgressSync:_postRead(book_id, payload, callback)
         end,
         on_error = function(err)
             logger.dbg("smart sync push failed:", tostring(err))
-            if callback then callback(false, nil) end
+            if callback then callback(false, err) end
         end,
     }))
+end
+
+function SmartProgressSync:_notify(text, timeout)
+    if self.plugin and type(self.plugin.showTransientInfo) == "function" then
+        self.plugin:showTransientInfo(text, timeout)
+    end
 end
 
 function SmartProgressSync:_pushProgress(book_id, book, position)
@@ -357,7 +367,14 @@ function SmartProgressSync:_pushProgress(book_id, book, position)
         end)
     end
     local payload = self:_buildReadPayload(book_id, book, position, psvts, pclts)
-    self:_postRead(book_id, payload)
+    self:_postRead(book_id, payload, function(ok, detail)
+        if ok then
+            self:_notify(_("Progress synced to WeRead"), 2)
+        else
+            self:_notify(T(_("Progress sync failed: %1"),
+                display_error(detail)), 3)
+        end
+    end)
 end
 
 -- Push only when the two positions are close (< DIFF_PERCENT apart) and the
