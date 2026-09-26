@@ -159,13 +159,16 @@ local function read_request_body()
     end
 end
 
--- Decision rule: within 3% and local ahead.
+-- Decision rule: within 3%, regardless of direction.
 expect(SmartSync.should_push(50, 48) == true, "close and ahead should push")
 expect(SmartSync.should_push(50, 47.5) == true, "2.5% ahead should push")
 expect(SmartSync.should_push(50, 47) == false, "exactly 3% apart should not push")
 expect(SmartSync.should_push(50, 45) == false, "far ahead should not push")
-expect(SmartSync.should_push(45, 50) == false, "local behind should not push")
-expect(SmartSync.should_push(50, 50) == false, "equal positions should not push")
+expect(SmartSync.should_push(45, 50) == false, "far behind should not push")
+expect(SmartSync.should_push(48, 50) == true, "close and behind should push")
+expect(SmartSync.should_push(47.5, 50) == true, "2.5% behind should push")
+expect(SmartSync.should_push(47, 50) == false, "exactly 3% behind should not push")
+expect(SmartSync.should_push(50, 50) == true, "equal percentages should still sync chapter position")
 
 -- Chapter-change run: local 50, remote 48 -> push.
 _G.__local_position = { percent = 50, chapter_uid = 2, chapter_idx = 2,
@@ -179,14 +182,25 @@ respond_to_pulls()
 expect(read_request_body() ~= nil,
     "a close, ahead local position should be pushed")
 
--- Remote further ahead inside 3% window but local behind: no push.
+-- Chapter change with remote ahead inside 3% window: push local progress.
 _G.__local_position = { percent = 45, chapter_uid = 2, book_id = "book" }
 _G.__remote_percent = 47
 sync = make_sync()
 requests = {}
-sync:runOnce()
+scheduled = {}
+sync.current_chapter_uid = "1"
+sync:onPageUpdate()
+expect(#scheduled == 1, "a backward chapter change should schedule a sync")
+scheduled[1].callback()
 respond_to_pulls()
-expect(read_request_body() == nil, "a behind local position must not be pushed")
+local pushed_behind = false
+for _, handle in ipairs(requests) do
+    if handle.req.url == "https://weread.qq.com/web/book/read"
+        and handle.req.body == "J45" then
+        pushed_behind = true
+    end
+end
+expect(pushed_behind, "chapter sync must upload local progress even when the server is ahead")
 
 -- Difference >= 3%: no push.
 _G.__local_position = { percent = 50, chapter_uid = 2, book_id = "book" }

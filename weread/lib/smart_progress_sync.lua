@@ -7,8 +7,7 @@
 --
 -- Trigger: when the reader moves to another chapter, and every 5 minutes while
 -- reading (cancelled on suspend/close). Action: pull remote progress, compare
--- with the local position, and only push when the two are within 3% and the
--- local position is ahead.
+-- with the local position, and push when the two are within 3%.
 
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local UIManager = require("ui/uimanager")
@@ -422,12 +421,11 @@ function SmartProgressSync:_pushProgress(book_id, book, position)
     end)
 end
 
--- Push only when the two positions are close (< DIFF_PERCENT apart) and the
--- local position is ahead, so a behind server is nudged forward without
--- fighting another device that is genuinely ahead.
+-- Push the local position when the two positions are close, regardless of
+-- which device is ahead. Keep the distance guard for large discrepancies.
 function SmartProgressSync.should_push(local_percent, remote_percent)
     local diff = (tonumber(local_percent) or 0) - (tonumber(remote_percent) or 0)
-    return math.abs(diff) < DIFF_PERCENT and diff > 0
+    return math.abs(diff) < DIFF_PERCENT
 end
 
 function SmartProgressSync:runOnce()
