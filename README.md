@@ -102,6 +102,7 @@ koreader/plugins/weread.koplugin/
 │   │   ├── 列表模式（默认；适合连续滚动）
 │   │   └── 封面模式（按屏幕自适应行列；仅加载当前页封面）
 │   ├── 启动时打开书架（默认关闭；开启后 KOReader 启动时直接进入书架）
+│   ├── 同步进度提醒（默认开启；关闭后自动进度同步不再显示成功或失败提示）
 │   ├── 分页书架（仅列表模式；默认开启，关闭后使用连续滚动）
 │   ├── 缓存管理
 │   │   ├── 扫描并关联本地书籍
@@ -173,4 +174,3 @@ Copyright © 2026 finlater and contributors.
 |------|-----------------------------------------------------|
 | [kindlebtcontroller.koplugin](https://github.com/finlater/kindlebtcontroller.koplugin) | 蓝牙手柄/遥控器控制 Kindle —— 翻页、调节亮度、章节跳转等 20+ 操作，按键完全可自定义。 |
 | [one.koplugin](https://github.com/finlater/one.koplugin) | 在 KOReader 上离线阅读「ONE · 一个」每日更新：一图、一文、一问答。           |
-

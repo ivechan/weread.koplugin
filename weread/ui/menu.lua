@@ -280,6 +280,22 @@ function M:getSettingsMenuItems()
                 end),
         },
         {
+            text = _("Progress sync notifications"),
+            keep_menu_open = true,
+            check_callback_updates_menu = true,
+            checked_func = function()
+                return self.settings:get("sync", {}).show_notifications ~= false
+            end,
+            callback = self:safeCallback(_("Progress sync notifications"),
+                function(touchmenu_instance)
+                    local sync = self.settings:get("sync", {})
+                    sync.show_notifications = not (sync.show_notifications ~= false)
+                    self.settings:set("sync", sync)
+                    self.settings:flush()
+                    if touchmenu_instance then touchmenu_instance:updateItems() end
+                end),
+        },
+        {
             text = _("Cache management"),
             sub_item_table_func = function()
                 return {

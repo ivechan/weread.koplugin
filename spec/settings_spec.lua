@@ -175,4 +175,13 @@ expect(values.api_key == "" and next(values.cookies) == nil
     and values.account.name == "",
     "account reset left credentials behind")
 
+expect(settings:get("sync").show_notifications == true,
+    "sync notifications should be enabled by default")
+local sync_config = settings:get("sync")
+sync_config.show_notifications = false
+settings:set("sync", sync_config)
+settings:flush()
+expect(settings:get("sync").show_notifications == false,
+    "disabling sync notifications should persist")
+
 print(("settings_spec: %d checks"):format(checks))

@@ -218,6 +218,7 @@ local zh = {
     ["Progress uploaded to WeRead: %1%"] = "进度已上传到微信读书：%1%",
     ["Progress upload failed:\n%1"] = "进度上传失败：\n%1",
     ["Progress synced to WeRead"] = "已同步阅读进度到微信读书",
+    ["Progress sync notifications"] = "同步进度提醒",
     ["Progress sync failed: %1"] = "同步阅读进度失败：%1",
     ["KOReader and WeRead are already at the same position."] = "KOReader 与微信读书已经处于同一位置。",
     ["Jumped to WeRead progress: %1%"] = "已跳转到微信读书进度：%1%",

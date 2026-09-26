@@ -353,6 +353,8 @@ function SmartProgressSync:_postRead(book_id, payload, callback)
 end
 
 function SmartProgressSync:_notify(text, timeout)
+    local config = self.plugin.settings:get("sync", {})
+    if config.show_notifications == false then return end
     if self.plugin and type(self.plugin.showTransientInfo) == "function" then
         self.plugin:showTransientInfo(text, timeout)
     end

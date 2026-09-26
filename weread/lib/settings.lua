@@ -23,6 +23,7 @@ local defaults = {
     books = {},
     downloads = {},
     sync = {
+        show_notifications = true,
         pull_on_open = false,
         upload_on_close = false,
         ask_on_conflict = true,

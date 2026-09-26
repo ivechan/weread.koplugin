@@ -65,6 +65,7 @@ local cache = {
     show_annotations = false,
 }
 local shelf = { sort_order = "time_desc" }
+local sync_config = { pull_on_open = false }
 local flush_count = 0
 local thought_popup = {
     height_ratio = 0.70,
@@ -86,11 +87,13 @@ local host = {
         get = function(_self, key, default)
             if key == "cache" then return cache end
             if key == "shelf" then return shelf end
+            if key == "sync" then return sync_config end
             if key == "thought_popup" then return thought_popup end
             return default
         end,
         set = function(_self, key, value)
             if key == "shelf" then shelf = value end
+            if key == "sync" then sync_config = value end
         end,
         flush = function() flush_count = flush_count + 1 end,
     },
@@ -399,6 +402,25 @@ expect(popup_items[5] and popup_items[5].text_func()
 expect(popup_items[6] and popup_items[6].text == "Tap left/right to turn pages"
         and not popup_items[6].checked_func(),
     "tap-to-page entry is present and off by default")
+
+local sync_notification_item
+for _, item in ipairs(settings_items) do
+    if item.text == "Progress sync notifications" then sync_notification_item = item end
+end
+expect(sync_notification_item and sync_notification_item.checked_func(),
+    "sync notifications default to enabled for existing settings")
+local notification_flushes = flush_count
+local notification_menu_updates = 0
+sync_notification_item.callback({ updateItems = function()
+    notification_menu_updates = notification_menu_updates + 1
+end })
+expect(sync_config.show_notifications == false and not sync_notification_item.checked_func()
+    and sync_config.pull_on_open == false and flush_count == notification_flushes + 1
+    and notification_menu_updates == 1,
+    "disabling sync notifications persists, refreshes the menu, and preserves sync settings")
+sync_notification_item.callback()
+expect(sync_config.show_notifications == true and sync_notification_item.checked_func(),
+    "sync notifications can be enabled again")
 
 print(string.format(
     "menu_prefetch_spec: %d checks, %d failure(s)", checks, failures))

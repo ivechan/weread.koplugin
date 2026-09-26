@@ -110,6 +110,7 @@ local function make_plugin(opts)
                 if key == "books" then return books end
                 if key == "api_key" then return opts.api_key or "KEY" end
                 if key == "cookies" then return { wr_skey = "x" } end
+                if key == "sync" then return opts.sync or {} end
             end,
             is_cookie_configured = function() return opts.cookie ~= false end,
             merge_set_cookie = function() end,
@@ -542,5 +543,20 @@ for _, status in ipairs({200, 500}) do
     requests[3].callbacks.on_done(status, {}, "no session")
     expect(#requests == 3, "an unusable session response must not upload")
 end
+
+-- Disabling notifications leaves uploads intact and suppresses all outcomes.
+local notification_config = { show_notifications = false }
+sync = make_sync({ sync = notification_config })
+requests, notifications = {}, {}
+sync:runOnce()
+respond_to_pulls()
+expect(read_request_body() ~= nil, "silent mode must still upload progress")
+respond_to_read(200)
+respond_to_read(500)
+respond_to_read(nil, "timeout")
+expect(#notifications == 0, "silent mode must suppress success and failure notices")
+notification_config.show_notifications = true
+respond_to_read(200)
+expect(#notifications == 1, "notifications can be re-enabled without restarting the reader")
 
 print(("smart_progress_sync_spec: %d checks"):format(checks))
